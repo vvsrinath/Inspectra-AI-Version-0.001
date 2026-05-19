@@ -40,6 +40,21 @@ Root `requirements.txt` and `runtime.txt` are included for repo-root deploys.
 3. On **Vercel**, set `INSPECTRA_API_URL` to that URL (no trailing slash)
 4. Redeploy Vercel frontend
 
+## Service suspended or 503
+
+If you see **"Service Suspended"** on Render:
+
+1. Open the service in [Render Dashboard](https://dashboard.render.com/web/srv-d868gobbc2fs73ffkp5g).
+2. Click **Resume** / **Restore** (or create a **New Web Service** from the same repo).
+3. Redeploy latest `main` after setting `PYTHON_VERSION=3.11.9`.
+
+## Docker deploy (if Native Python build still fails)
+
+1. Render → your service → **Settings** → change runtime to **Docker** (or create new Docker web service).
+2. **Root Directory:** repo root (empty).
+3. **Dockerfile path:** `Dockerfile` (at repo root).
+4. Deploy — includes OpenCV system libraries (`libgl1`).
+
 ## Free tier note
 
 First request after idle may take 30–60 seconds (cold start). Retry if health check fails once.

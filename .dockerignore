@@ -1,0 +1,10 @@
+frontend/node_modules
+frontend/.next
+backend/.venv
+backend/venv
+**/__pycache__
+.git
+tmp_samples
+*.log
+compare_out.json
+pdf_out.json
