@@ -1,11 +1,13 @@
-# Deploy backend on Render (free tier). Connect repo, set Root Directory: backend
-# Then set INSPECTRA_API_URL on Vercel to the Render service URL.
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Dashboard: connect https://github.com/vvsrinath/Inspectra-AI-Version-0.001
 services:
   - type: web
     name: inspectra-api
     runtime: python
+    plan: free
+    region: oregon
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
