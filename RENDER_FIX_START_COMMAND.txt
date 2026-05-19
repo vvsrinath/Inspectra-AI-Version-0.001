@@ -1,0 +1,7 @@
+RENDER START COMMAND (required — copy into Render Dashboard → Settings → Start Command):
+
+bash start.sh
+
+Do NOT use: gunicorn Inspectra-AI-Version-0.001.wsgi
+
+After saving, click Manual Deploy on branch main.

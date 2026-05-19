@@ -1,2 +1,4 @@
 # Render builds from repo root by default — install backend dependencies
 -r backend/requirements.txt
+# When Render runs auto `gunicorn …wsgi`, this shim provides `gunicorn` → uvicorn
+-e ./deploy/render-shim

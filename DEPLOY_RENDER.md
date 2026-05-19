@@ -42,6 +42,8 @@ Or: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
 
 Do **not** use `gunicorn Inspectra-AI-Version-0.001.wsgi` (invalid for this FastAPI app).
 
+**Automatic fix (commit after `ba3f665`):** `pip install -r requirements.txt` also installs `deploy/render-shim`, which registers a `gunicorn` command that starts **uvicorn**. If Render still runs the auto `gunicorn …wsgi` line, deploy should work **without** changing Start Command — check logs for `"message":"gunicorn_shim_start"`.
+
 **Set `PYTHON_VERSION` = `3.11.9`** in Render → Environment. Without it, Render may use Python 3.14 and OpenCV can fail.
 
 ## Environment variables
