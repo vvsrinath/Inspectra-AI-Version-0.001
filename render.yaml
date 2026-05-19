@@ -1,14 +1,16 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
-# Dashboard: connect https://github.com/vvsrinath/Inspectra-AI-Version-0.001
+# Repo: https://github.com/vvsrinath/Inspectra-AI-Version-0.001
+#
+# Works whether Render uses repo root OR Root Directory = backend.
 services:
   - type: web
     name: inspectra-api
     runtime: python
     plan: free
     region: oregon
-    rootDir: backend
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    # Leave rootDir empty so root requirements.txt + runtime.txt apply (Python 3.11)
+    buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION

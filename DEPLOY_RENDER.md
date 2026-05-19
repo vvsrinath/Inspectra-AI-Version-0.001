@@ -4,15 +4,22 @@ Use your service: [Render Dashboard](https://dashboard.render.com/web/srv-d868go
 
 ## Manual settings (if not using Blueprint)
 
+**If build fails with `No such file or directory: requirements.txt`**, Render is using the **repo root** — use these commands:
+
 | Setting | Value |
 |---------|--------|
 | **Repository** | `vvsrinath/Inspectra-AI-Version-0.001` |
 | **Branch** | `main` |
-| **Root Directory** | `backend` |
+| **Root Directory** | *(leave empty)* or `backend` — see below |
 | **Runtime** | Python 3 |
-| **Build Command** | `pip install --upgrade pip && pip install -r requirements.txt` |
-| **Start Command** | `uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| **Build Command** (repo root) | `pip install --upgrade pip && pip install -r backend/requirements.txt` |
+| **Start Command** (repo root) | `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| **Build Command** (if Root = `backend`) | `pip install --upgrade pip && pip install -r requirements.txt` |
+| **Start Command** (if Root = `backend`) | `uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | **Health Check Path** | `/` |
+| **PYTHON_VERSION** | `3.11.9` (do not use 3.14 — OpenCV may fail) |
+
+Root `requirements.txt` and `runtime.txt` are included for repo-root deploys.
 
 ## Environment variables
 

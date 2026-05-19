@@ -141,9 +141,10 @@ Code is pushed to:
 See **[DEPLOY_RENDER.md](./DEPLOY_RENDER.md)** for dashboard settings.
 
 1. [render.com](https://render.com) → **New Web Service** → connect [this repo](https://github.com/vvsrinath/Inspectra-AI-Version-0.001).  
-2. **Root Directory:** `backend`  
-3. **Build:** `pip install --upgrade pip && pip install -r requirements.txt`  
-4. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT`  
+2. **Root Directory:** leave empty **or** set `backend`  
+3. **Build (repo root):** `pip install --upgrade pip && pip install -r backend/requirements.txt`  
+4. **Start (repo root):** `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`  
+   Set **PYTHON_VERSION** = `3.11.9` in Render env (not 3.14).  
    Or apply the root **`render.yaml`** blueprint.  
 5. Copy the public URL, e.g. `https://inspectra-api.onrender.com` — test `GET /` returns `status: ok`.
 
