@@ -13,7 +13,7 @@ Use your service: [Render Dashboard](https://dashboard.render.com/web/srv-d868go
 | **Root Directory** | *(leave empty)* or `backend` — see below |
 | **Runtime** | Python 3 |
 | **Build Command** (repo root) | `pip install --upgrade pip && pip install -r backend/requirements.txt` |
-| **Start Command** (repo root) | `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| **Start Command** (repo root) | `bash start.sh` |
 | **Build Command** (if Root = `backend`) | `pip install --upgrade pip && pip install -r requirements.txt` |
 | **Start Command** (if Root = `backend`) | `uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | **Health Check Path** | `/` |
@@ -22,6 +22,25 @@ Use your service: [Render Dashboard](https://dashboard.render.com/web/srv-d868go
 Root `requirements.txt` and `runtime.txt` are included for repo-root deploys.
 
 **After commit `8a30288`:** even the default build command `pip install -r requirements.txt` works (root file includes `-r backend/requirements.txt`).
+
+### Wrong start command (`gunicorn: command not found`)
+
+If deploy log shows:
+
+```text
+Running 'gunicorn Inspectra-AI-Version-0.001.wsgi'
+gunicorn: command not found
+```
+
+Render auto-detected the wrong stack. **Fix:** Settings → **Start Command** → set exactly:
+
+```bash
+bash start.sh
+```
+
+Or: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
+
+Do **not** use `gunicorn Inspectra-AI-Version-0.001.wsgi` (invalid for this FastAPI app).
 
 **Set `PYTHON_VERSION` = `3.11.9`** in Render → Environment. Without it, Render may use Python 3.14 and OpenCV can fail.
 

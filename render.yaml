@@ -10,7 +10,7 @@ services:
     region: oregon
     # Leave rootDir empty so root requirements.txt + runtime.txt apply (Python 3.11)
     buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: bash start.sh
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
