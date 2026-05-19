@@ -187,6 +187,12 @@ Optional environment variables:
 
 ---
 
+## Keep free tier awake (optional cron)
+
+Free hosts (Render, Zeabur, etc.) **sleep after ~15 min** idle. Use a scheduled ping:
+
+- **GitHub Actions:** [DEPLOY_KEEP_ALIVE.md](./DEPLOY_KEEP_ALIVE.md) — workflow runs every 14 minutes after you set secrets `KEEP_ALIVE_FRONTEND_URL` and `KEEP_ALIVE_API_URL`.
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -194,6 +200,7 @@ Optional environment variables:
 | API offline in UI | Run `start.bat` locally, or set `INSPECTRA_API_URL` on Vercel |
 | Works on PC, fails on phone | Use LAN URL for frontend; API must be reachable via proxy or public backend URL |
 | Render slow first request | Free tier cold start; wait and retry |
+| App sleeps on free tier | See [DEPLOY_KEEP_ALIVE.md](./DEPLOY_KEEP_ALIVE.md) |
 | CORS errors | Add Vercel URL to backend `ALLOWED_ORIGINS` |
 
 ---

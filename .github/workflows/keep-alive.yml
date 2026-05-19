@@ -1,0 +1,35 @@
+# Pings your deployed app on a schedule so free-tier hosts (Render, Zeabur, etc.)
+# are less likely to sleep. Set GitHub repo secrets (see DEPLOY_KEEP_ALIVE.md).
+name: Keep alive
+
+on:
+  schedule:
+    # Every 14 minutes (Render free tier sleeps after ~15 min idle)
+    - cron: "*/14 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping frontend
+        if: ${{ secrets.KEEP_ALIVE_FRONTEND_URL != '' }}
+        run: |
+          echo "GET $FRONTEND_URL"
+          curl -sfS --max-time 60 -o /dev/null -w "HTTP %{http_code}\n" "$FRONTEND_URL"
+        env:
+          FRONTEND_URL: ${{ secrets.KEEP_ALIVE_FRONTEND_URL }}
+
+      - name: Ping API health
+        if: ${{ secrets.KEEP_ALIVE_API_URL != '' }}
+        run: |
+          echo "GET $API_URL"
+          curl -sfS --max-time 60 -o /dev/null -w "HTTP %{http_code}\n" "$API_URL"
+        env:
+          API_URL: ${{ secrets.KEEP_ALIVE_API_URL }}
+
+      - name: Secrets reminder
+        if: ${{ secrets.KEEP_ALIVE_FRONTEND_URL == '' && secrets.KEEP_ALIVE_API_URL == '' }}
+        run: |
+          echo "::warning::No KEEP_ALIVE_* secrets set. Add them in GitHub → Settings → Secrets → Actions"
+          echo "See DEPLOY_KEEP_ALIVE.md"
