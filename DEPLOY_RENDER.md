@@ -21,6 +21,10 @@ Use your service: [Render Dashboard](https://dashboard.render.com/web/srv-d868go
 
 Root `requirements.txt` and `runtime.txt` are included for repo-root deploys.
 
+**After commit `8a30288`:** even the default build command `pip install -r requirements.txt` works (root file includes `-r backend/requirements.txt`).
+
+**Set `PYTHON_VERSION` = `3.11.9`** in Render → Environment. Without it, Render may use Python 3.14 and OpenCV can fail.
+
 ## Environment variables
 
 | Key | Value |
