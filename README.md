@@ -56,8 +56,8 @@ flowchart LR
 | Frontend | Next.js 16, React 19, Tailwind CSS 4 |
 | Backend | FastAPI, OpenCV, scikit-image, ReportLab |
 | Local run | `start.bat` → uvicorn `:8000` + `npm run dev` `:3000` |
-| Production UI | **Vercel** (`frontend/`) |
-| Production API | **Render / Railway** (`backend/`) — not Vercel |
+| Production (all-in-one) | **Vercel** — UI + Python API ([DEPLOY_VERCEL.md](./DEPLOY_VERCEL.md)) |
+| Production (split) | **Vercel** UI + **Render** API ([DEPLOY_RENDER.md](./DEPLOY_RENDER.md)) |
 
 ---
 
@@ -124,13 +124,19 @@ The frontend calls **`/api/proxy`**, which Next.js forwards to `localhost:8000` 
 
 ## Deploy to production
 
+### Option A — Everything on Vercel (recommended)
+
+See **[DEPLOY_VERCEL.md](./DEPLOY_VERCEL.md)** — one project, `frontend/` as root directory.
+
+### Option B — Split (Vercel + Render)
+
 ### 1. GitHub
 
 Code is pushed to:
 
 `https://github.com/vvsrinath/Inspectra-AI-Version-0.001.git`
 
-### 2. Backend → Render (recommended)
+### 2. Backend → Render
 
 See **[DEPLOY_RENDER.md](./DEPLOY_RENDER.md)** for dashboard settings.
 

@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# generated for Vercel Python bundle
+/api/_backend
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -1,9 +1,14 @@
-/** Resolve API base URL: same-origin proxy in browser, direct URL on server. */
+/** Resolve API base URL for browser and server. */
 export function resolveApiBase(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
   if (envUrl) return envUrl;
 
   if (typeof window !== "undefined") {
+    // Vercel: Python FastAPI runs at /api (same deployment)
+    if (process.env.NEXT_PUBLIC_VERCEL_API === "1") {
+      return `${window.location.origin}/api`;
+    }
+    // Local dev: Next.js rewrites /api/proxy → localhost:8000
     return `${window.location.origin}/api/proxy`;
   }
 
