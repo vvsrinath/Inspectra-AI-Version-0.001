@@ -56,8 +56,7 @@ flowchart LR
 | Frontend | Next.js 16, React 19, Tailwind CSS 4 |
 | Backend | FastAPI, OpenCV, scikit-image, ReportLab |
 | Local run | `start.bat` → uvicorn `:8000` + `npm run dev` `:3000` |
-| Production (all-in-one) | **Vercel** — UI + Python API ([DEPLOY_VERCEL.md](./DEPLOY_VERCEL.md)) |
-| Production (split) | **Vercel** UI + **Render** API ([DEPLOY_RENDER.md](./DEPLOY_RENDER.md)) |
+| Production (recommended) | **Vercel** UI + **Render** API ([DEPLOY_VERCEL.md](./DEPLOY_VERCEL.md)) |
 
 ---
 
@@ -164,7 +163,7 @@ Optional environment variables:
 
 | Name | Value |
 |------|--------|
-| `INSPECTRA_API_URL` | Your Render API URL (required) |
+| `INSPECTRA_API_URL` | Your Render API URL (required, no trailing slash) |
 | `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` |
 
 4. Deploy. The UI uses `/api/proxy/*`; Vercel forwards requests to `INSPECTRA_API_URL`.
