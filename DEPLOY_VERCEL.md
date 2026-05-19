@@ -13,7 +13,7 @@ Use this when your **FastAPI backend is on Render** (recommended — OpenCV work
 
 | Name | Value | Example |
 |------|--------|---------|
-| `INSPECTRA_API_URL` | Your **Render** API URL, no trailing slash | `https://inspectra-api.onrender.com` |
+| `INSPECTRA_API_URL` | Your **Render** API URL, no trailing slash | `https://inspectra-ai-version-0-001-3.onrender.com` |
 
 Apply to **Production**, **Preview**, and **Development**.
 

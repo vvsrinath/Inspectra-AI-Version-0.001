@@ -23,7 +23,7 @@ This repo includes a **GitHub Actions** workflow: [`.github/workflows/keep-alive
 | Deploy style | `KEEP_ALIVE_FRONTEND_URL` | `KEEP_ALIVE_API_URL` |
 |--------------|---------------------------|----------------------|
 | Vercel (all-in-one) | `https://your-app.vercel.app` | `https://your-app.vercel.app/api` |
-| Vercel + Render | `https://your-app.vercel.app` | `https://inspectra-api.onrender.com/` |
+| Vercel + Render | `https://your-app.vercel.app` | `https://inspectra-ai-version-0-001-3.onrender.com/` |
 | Zeabur (2 services) | `https://frontend-xxx.zeabur.app` | `https://backend-xxx.zeabur.app/` |
 
 ## Other free cron services

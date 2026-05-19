@@ -3,5 +3,8 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "installCommand": "npm install",
-  "regions": ["iad1"]
+  "regions": ["iad1"],
+  "env": {
+    "INSPECTRA_API_URL": "https://inspectra-ai-version-0-001-3.onrender.com"
+  }
 }

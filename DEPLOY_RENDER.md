@@ -56,7 +56,7 @@ Do **not** use `gunicorn Inspectra-AI-Version-0.001.wsgi` (invalid for this Fast
 
 ## After deploy
 
-1. Copy the public URL, e.g. `https://inspectra-api.onrender.com`
+1. Copy the public URL, e.g. `https://inspectra-ai-version-0-001-3.onrender.com`
 2. Test: open `https://YOUR-SERVICE.onrender.com/` — should return `{"status":"ok",...}`
 3. On **Vercel**, set `INSPECTRA_API_URL` to that URL (no trailing slash)
 4. Redeploy Vercel frontend
