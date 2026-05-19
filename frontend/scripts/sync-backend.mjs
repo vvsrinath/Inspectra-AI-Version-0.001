@@ -1,9 +1,15 @@
 /**
- * Copies backend/ into api/_backend for Vercel Python serverless (prebuild).
+ * Copies backend/ into api/_backend for Vercel Python serverless (opt-in only).
+ * Skipped when using Render backend (NEXT_PUBLIC_VERCEL_API != 1).
  */
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+
+if (process.env.NEXT_PUBLIC_VERCEL_API !== "1") {
+  console.log("sync-backend: skipped (use INSPECTRA_API_URL / Render backend)");
+  process.exit(0);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(__dirname, "../../backend");

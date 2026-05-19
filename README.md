@@ -124,11 +124,12 @@ The frontend calls **`/api/proxy`**, which Next.js forwards to `localhost:8000` 
 
 ## Deploy to production
 
-### Option A — Everything on Vercel (recommended)
+### Option A — Vercel frontend + Render backend (recommended)
 
-See **[DEPLOY_VERCEL.md](./DEPLOY_VERCEL.md)** — one project, `frontend/` as root directory.
+1. Deploy API on **Render** ([DEPLOY_RENDER.md](./DEPLOY_RENDER.md)) — copy your public URL.
+2. Deploy UI on **Vercel** ([DEPLOY_VERCEL.md](./DEPLOY_VERCEL.md)) — root `frontend/`, set `INSPECTRA_API_URL` to Render URL.
 
-### Option B — Split (Vercel + Render)
+### Option B — Split (details)
 
 ### 1. GitHub
 

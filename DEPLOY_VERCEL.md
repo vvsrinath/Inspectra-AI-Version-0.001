@@ -1,49 +1,61 @@
-# Deploy frontend + backend on Vercel (single project)
+# Deploy frontend on Vercel (Render backend)
 
-Both the **Next.js UI** and **FastAPI/Python API** deploy together from the `frontend/` folder.
+Use this when your **FastAPI backend is on Render** (recommended — OpenCV works reliably).
+
+## 1. Vercel project
+
+1. Go to [vercel.com](https://vercel.com) → **Add New Project**
+2. Import [Inspectra-AI-Version-0.001](https://github.com/vvsrinath/Inspectra-AI-Version-0.001)
+3. **Root Directory:** `frontend`
+4. Framework: **Next.js** (auto-detected)
+
+## 2. Environment variable (required)
+
+| Name | Value | Example |
+|------|--------|---------|
+| `INSPECTRA_API_URL` | Your **Render** API URL, no trailing slash | `https://inspectra-api.onrender.com` |
+
+Apply to **Production**, **Preview**, and **Development**.
+
+**Do not** set `NEXT_PUBLIC_VERCEL_API=1` for this setup.
+
+## 3. Deploy
+
+Click **Deploy**. Build should complete in ~2–3 minutes (no Python/OpenCV on Vercel).
+
+## 4. Verify
+
+1. Open `https://YOUR-APP.vercel.app`
+2. Sidebar shows **API online** (green)
+3. **Analyze** — upload one image → results load
+4. **Compare** — upload 2+ images → table appears
+
+If API is offline:
+
+- Confirm Render URL works: `https://YOUR-SERVICE.onrender.com/` → `{"status":"ok",...}`
+- Confirm `INSPECTRA_API_URL` matches exactly (https, no trailing `/`)
+- **Redeploy** Vercel after changing env vars
 
 ## How it works
 
 ```
-Browser → your-app.vercel.app
-            ├── /              → Next.js pages
-            └── /api/*         → Python serverless (FastAPI + OpenCV via Mangum)
+Browser → your-app.vercel.app/api/proxy/*
+       → Next.js rewrite (INSPECTRA_API_URL)
+       → Render FastAPI
 ```
 
-At build time, `npm run prebuild` copies `backend/` into `frontend/api/_backend`.  
-Vercel runs `api/index.py` as a serverless function (60s max, 3GB RAM).
+## Render CORS
 
-## Vercel setup
+Backend allows `https://*.vercel.app` by default. For a custom domain, add on Render:
 
-1. Import [GitHub repo](https://github.com/vvsrinath/Inspectra-AI-Version-0.001)
-2. **Root Directory:** `frontend`
-3. Framework: **Next.js** (auto)
-4. Environment variables (optional):
+| Key | Value |
+|-----|--------|
+| `ALLOWED_ORIGINS` | `https://your-app.vercel.app` |
 
-| Variable | Value |
-|----------|--------|
-| `NEXT_PUBLIC_VERCEL_API` | `1` (already in `vercel.json`) |
-| `NEXT_PUBLIC_APP_URL` | `https://your-app.vercel.app` |
+---
 
-5. Deploy
+## Optional: all-in-one on Vercel (UI + Python API)
 
-## Verify
+Heavier build; may fail on free tier. Set `NEXT_PUBLIC_VERCEL_API=1` and see git history for `vercel.json` Python function config.
 
-- Open `https://YOUR-APP.vercel.app` → sidebar **API online** (green)
-- `https://YOUR-APP.vercel.app/api` → `{"status":"ok",...}`
-- Run **Analyze** with one image
-
-## Limits (important)
-
-| Limit | Free / Hobby |
-|-------|----------------|
-| Function timeout | 60s max (set in `vercel.json`) |
-| Bundle size | OpenCV is large — build may take several minutes |
-| Cold start | First request after idle can be slow |
-
-If the **build fails** (package too large), use **split deploy**: frontend on Vercel + backend on [Render](./DEPLOY_RENDER.md) with `INSPECTRA_API_URL`.
-
-## Local development
-
-Still use **`start.bat`** (separate backend on :8000).  
-The UI uses `/api/proxy` locally, not Vercel `/api`.
+For most users: **Vercel frontend + Render backend** (this guide).

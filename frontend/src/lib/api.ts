@@ -82,6 +82,9 @@ function networkErrorMessage(path: string, err: unknown): string {
     msg.includes("NetworkError") ||
     msg.includes("ECONNREFUSED")
   ) {
+    if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
+      return `Cannot reach the API. Set INSPECTRA_API_URL on Vercel to your Render backend URL. Path: ${path}`;
+    }
     return `Cannot reach the API. Run start.bat (backend :8000) and refresh. Path: ${path}`;
   }
   return msg || "Network request failed";

@@ -88,7 +88,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span
               className={`h-2 w-2 rounded-full ${apiOk === null ? "bg-amber-500 animate-pulse" : apiOk ? "bg-green-500" : "bg-destructive"}`}
             />
-            {apiOk === null ? "Connecting…" : apiOk ? "API online" : "API offline — run start.bat"}
+            {apiOk === null
+              ? "Connecting…"
+              : apiOk
+                ? "API online"
+                : "API offline — check Vercel INSPECTRA_API_URL or start.bat"}
           </div>
           <Button
             variant="ghost"
