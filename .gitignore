@@ -1,0 +1,32 @@
+# Python
+backend/.venv/
+backend/venv/
+__pycache__/
+*.py[cod]
+.Python
+*.egg-info/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+frontend/.env*
+!frontend/.env.example
+
+# Local dev artifacts
+tmp_samples/
+compare_out.json
+pdf_out.json
+debug-*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.cursor/
+*.log
