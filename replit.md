@@ -1,6 +1,6 @@
-# [Project name]
+# Inspectra AI
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Analyzes textile and cotton fabric images using classical computer vision (no AI/ML models). Produces lab-style metric reports, multi-sample batch comparison, and downloadable PDF/CSV exports. Each user gets a private browser workspace so reports are not mixed between visitors.
 
 ## Run & Operate
 
@@ -10,11 +10,13 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Optional env: `VITE_API_URL` — URL of the FastAPI backend (defaults to `/api/proxy`)
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- Frontend: React + Vite + Tailwind CSS v4 + wouter routing
+- API: Express 5 (scaffold only — main backend is a separate FastAPI Python service)
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
@@ -22,15 +24,26 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/inspectra/` — React + Vite frontend (preview at `/`)
+- `artifacts/api-server/` — Express API scaffold
+- `artifacts/inspectra/src/pages/` — Route pages (Home, Analyze, Compare, Dashboard, Result, Login)
+- `artifacts/inspectra/src/components/` — AppShell, ProductChrome, LabReportTable, theme-provider
+- `artifacts/inspectra/src/lib/` — api.ts (API calls), api-base.ts, workspace.ts, report-store.ts (IndexedDB)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Reports are stored in **IndexedDB on the user's device**, not a server database. Each user has a random workspace ID in a cookie.
+- The frontend calls a **FastAPI Python backend** for analysis (set `VITE_API_URL`). The Express api-server is scaffold-only.
+- **No AI/ML models used** — classical OpenCV + scikit-image pipelines only.
+- `next/image` → `<img>`, `next/link` → wouter `<Link>`, `useRouter` → `useLocation`/`useParams`, `useParams` → wouter `useParams`.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- **Home** — Choose single-sample Analyze or multi-sample Compare.
+- **Analyze** — Upload a fabric image → sends to FastAPI `/analyze-material` → redirects to Results.
+- **Compare** — Upload 2–10 images → sends to FastAPI `/compare-batch` → shows comparison table + download buttons.
+- **Dashboard** — Lists all reports saved in IndexedDB for this workspace.
+- **Results** — Shows lab report with metrics table, findings, download PDF/CSV buttons.
 
 ## User preferences
 
@@ -38,7 +51,9 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- API calls go to `VITE_API_URL` (env var). Without it, the app shows "API offline" in the sidebar — this is expected in dev until a backend URL is configured.
+- The `next-themes` package is used for dark/light mode (same as original).
+- Report data uses `sessionStorage` for the just-analyzed result and IndexedDB for persisted history.
 
 ## Pointers
 
