@@ -3,10 +3,7 @@ export function resolveApiBase(): string {
   if (publicUrl) return publicUrl;
 
   if (typeof window !== "undefined") {
-    if (import.meta.env.VITE_VERCEL_API === "1") {
-      return `${window.location.origin}/api`;
-    }
-    return `${window.location.origin}/api/proxy`;
+    return `${window.location.origin}/api`;
   }
 
   return "/api";

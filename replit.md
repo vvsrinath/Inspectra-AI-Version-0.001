@@ -10,7 +10,7 @@ Analyzes textile and cotton fabric images using classical computer vision (no AI
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
-- Optional env: `VITE_API_URL` — URL of the FastAPI backend (defaults to `/api/proxy`)
+- Optional env: `VITE_API_URL` — Override for the FastAPI backend URL (defaults to `window.location.origin + /api`)
 
 ## Stack
 

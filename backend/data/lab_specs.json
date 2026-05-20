@@ -1,0 +1,43 @@
+{
+  "columns": ["SSIM", "TEX", "WVE", "SHP", "EDG", "UNF", "STN", "SIM", "QLY", "GRD"],
+  "column_labels": {
+    "SSIM": "Structural similarity",
+    "TEX": "Texture index (GLCM)",
+    "WVE": "Weave periodicity (FFT)",
+    "SHP": "Sharpness (Laplacian)",
+    "EDG": "Edge density",
+    "UNF": "Uniformity index",
+    "STN": "Stain index",
+    "SIM": "Similarity composite",
+    "QLY": "Quality score",
+    "GRD": "Grade"
+  },
+  "pass_thresholds": {
+    "SIM": { "pass_min": 75, "warn_min": 60 },
+    "QLY": { "pass_min": 65, "warn_min": 50 },
+    "STN": { "pass_max": 15, "warn_max": 25 },
+    "TEX": { "pass_max": 85, "warn_max": 95 }
+  },
+  "cv_limits_percent": {
+    "SIM": 5,
+    "QLY": 8,
+    "STN": 10,
+    "WVE": 12,
+    "default": 15
+  },
+  "grade_from_qly": [
+    { "min": 85, "grade": "A" },
+    { "min": 70, "grade": "B" },
+    { "min": 55, "grade": "C" },
+    { "min": 0, "grade": "D" }
+  ],
+  "sim_weights": {
+    "SSIM": 0.25,
+    "TEX": 0.15,
+    "WVE": 0.15,
+    "SHP": 0.1,
+    "EDG": 0.1,
+    "UNF": 0.15,
+    "STN": 0.1
+  }
+}
