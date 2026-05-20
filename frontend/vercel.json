@@ -5,6 +5,6 @@
   "installCommand": "npm install",
   "regions": ["iad1"],
   "env": {
-    "INSPECTRA_API_URL": "https://inspectra-ai-version-0-001-3.onrender.com"
+    "INSPECTRA_API_URL": "https://inspectra-ai-version-0-001-4.onrender.com"
   }
 }
