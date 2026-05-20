@@ -67,7 +67,7 @@ async function proxyRequest(
     responseHeaders.set(key, value);
   });
 
-  const responseBody = await upstream.arrayBuffer();
+  const responseBody = await upstream.text();
 
   return new NextResponse(responseBody, {
     status: upstream.status,
