@@ -21,6 +21,8 @@ const HOP_BY_HOP = new Set([
   "upgrade",
   "host",
   "content-length",
+  "content-encoding",
+  "accept-encoding",
 ]);
 
 async function proxyRequest(
