@@ -44,6 +44,18 @@ async function proxyRequest(
   const hasBody = !["GET", "HEAD"].includes(req.method);
   const body = hasBody ? await req.arrayBuffer() : undefined;
 
+  if (req.nextUrl.searchParams.get("debug") === "true") {
+    return NextResponse.json({
+      envTarget: process.env.INSPECTRA_API_URL || null,
+      resolvedTarget: target,
+      apiTarget: apiTarget(),
+      path,
+      pathSegments,
+      method: req.method,
+      headers: Array.from(headers.entries()),
+    });
+  }
+
   let upstream: Response;
   try {
     upstream = await fetch(target, {
@@ -68,6 +80,15 @@ async function proxyRequest(
   });
 
   const responseBody = await upstream.text();
+
+  if (req.nextUrl.searchParams.get("debug") === "upstream") {
+    return NextResponse.json({
+      target,
+      status: upstream.status,
+      headers: Array.from(upstream.headers.entries()),
+      body: responseBody,
+    });
+  }
 
   return new NextResponse(responseBody, {
     status: upstream.status,
