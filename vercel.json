@@ -1,13 +1,6 @@
 {
   "builds": [
-    { "src": "frontend/next.config.ts", "use": "@vercel/next" },
-    { "src": "api/**/*.py", "use": "@vercel/python" }
-  ],
-  "functions": {
-    "api/**/*.py": {
-      "runtime": "python3.11",
-      "maxDuration": 60,
-      "memory": 1024
-    }
-  }
+    { "src": "frontend/next.config.ts", "use": "@vercel/next" }
+  ]
+
 }

@@ -8,8 +8,8 @@ export function resolveApiBase(): string {
     if (process.env.NEXT_PUBLIC_VERCEL_API === "1") {
       return `${window.location.origin}/api`;
     }
-    // Vercel + Render: runtime proxy route reads INSPECTRA_API_URL
-    return `${window.location.origin}/api/proxy`;
+    // Use hosted Render backend (fallback)
+    return "https://inspectra-ai-version-0-001-4.onrender.com/api";
   }
 
 
