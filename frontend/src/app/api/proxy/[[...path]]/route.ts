@@ -6,7 +6,7 @@ export const maxDuration = 60;
 function apiTarget(): string {
   return (
     process.env.INSPECTRA_API_URL?.replace(/\/$/, "") ??
-    "http://127.0.0.1:8000"
+    "https://inspectra-ai-version-0-001-4.onrender.com"
   );
 }
 
