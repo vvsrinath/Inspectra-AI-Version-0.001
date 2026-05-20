@@ -1,19 +1,9 @@
 import type { NextConfig } from "next";
 
-/** Backend URL for /api/proxy rewrites (set on Vercel: INSPECTRA_API_URL) */
-const apiTarget =
-  process.env.INSPECTRA_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
-
+/** API proxy: src/app/api/proxy/[[...path]]/route.ts (runtime INSPECTRA_API_URL) */
 const nextConfig: NextConfig = {
+  output: "standalone",
   allowedDevOrigins: ["192.168.1.11", "127.0.0.1"],
-  async rewrites() {
-    return [
-      {
-        source: "/api/proxy/:path*",
-        destination: `${apiTarget}/:path*`,
-      },
-    ];
-  },
 };
 
 export default nextConfig;

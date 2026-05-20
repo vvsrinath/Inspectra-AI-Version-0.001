@@ -106,7 +106,8 @@ export async function apiFetch(
     headers.delete("Content-Type");
   }
   try {
-    return await fetch(url, { ...init, headers });
+    const res = await fetch(url, { ...init, headers });
+    return res;
   } catch (err) {
     throw new Error(networkErrorMessage(path, err));
   }

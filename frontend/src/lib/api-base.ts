@@ -8,12 +8,14 @@ export function resolveApiBase(): string {
     if (process.env.NEXT_PUBLIC_VERCEL_API === "1") {
       return `${window.location.origin}/api`;
     }
-    // Vercel + Render (or local): same-origin proxy → INSPECTRA_API_URL / localhost:8000
+    // Vercel + Render: runtime proxy route reads INSPECTRA_API_URL
     return `${window.location.origin}/api/proxy`;
   }
+
 
   const serverProxy = process.env.INSPECTRA_API_URL?.replace(/\/$/, "");
   if (serverProxy) return serverProxy;
 
-  return "http://127.0.0.1:8000";
+  // Default to relative API path for Vercel
+  return "/api";
 }
