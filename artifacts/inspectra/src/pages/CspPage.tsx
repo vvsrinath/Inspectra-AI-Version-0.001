@@ -13,6 +13,10 @@ import {
   Wheat,
   BarChart3,
   BookOpen,
+  Download,
+  FileText,
+  HardDrive,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
@@ -76,7 +80,9 @@ const GRADE_BG: Record<string, string> = {
   D: "bg-destructive/10 border-destructive/30",
 };
 
-function BenchmarkBar({ value, min, max, label }: { value: number; min: number; max: number; label: string }) {
+function BenchmarkBar({
+  value, min, max, label,
+}: { value: number; min: number; max: number; label: string }) {
   const pct = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
   return (
     <div className="space-y-1">
@@ -85,17 +91,62 @@ function BenchmarkBar({ value, min, max, label }: { value: number; min: number; 
         <span className="font-mono font-medium">{value}</span>
       </div>
       <div className="h-2 rounded-full bg-secondary overflow-hidden">
-        <div
-          className="h-full rounded-full bg-primary transition-all"
-          style={{ width: `${pct}%` }}
-        />
+        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground/60">
-        <span>{min}</span>
-        <span>{max}</span>
+        <span>{min}</span><span>{max}</span>
       </div>
     </div>
   );
+}
+
+async function downloadCspPdf(result: CspResult) {
+  const base = resolveApiBase();
+  const res = await fetch(`${base}/csp-report/pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(apiHeaders() as Record<string, string>) },
+    body: JSON.stringify(result),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `PDF failed (${res.status})`);
+  }
+  const { pdf_base64 } = (await res.json()) as { pdf_base64: string };
+  const lot = result.report_meta?.lot_id?.replace(/[^a-zA-Z0-9-]/g, "_") ?? "csp";
+  const link = document.createElement("a");
+  link.href = `data:application/pdf;base64,${pdf_base64}`;
+  link.download = `Inspectra-CSP-${lot}-${result.analysis_id}.pdf`;
+  link.click();
+}
+
+async function downloadCspCsv(result: CspResult) {
+  const base = resolveApiBase();
+  const res = await fetch(`${base}/csp-report/csv`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(apiHeaders() as Record<string, string>) },
+    body: JSON.stringify(result),
+  });
+  if (!res.ok) throw new Error(`CSV failed (${res.status})`);
+  const text = await res.text();
+  const blob = new Blob([text], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `Inspectra-CSP-${result.analysis_id}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveToDrive(result: CspResult): Promise<string> {
+  const base = resolveApiBase();
+  const res = await fetch(`${base}/save-to-drive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(apiHeaders() as Record<string, string>) },
+    body: JSON.stringify({ ...result, report_type: "csp" }),
+  });
+  if (!res.ok) throw new Error(`Drive save failed (${res.status})`);
+  const data = await res.json() as { message?: string };
+  return data.message ?? "Saved to Google Drive";
 }
 
 export default function CspPage() {
@@ -108,12 +159,20 @@ export default function CspPage() {
   const [millName, setMillName] = useState("");
   const [operator, setOperator] = useState("MMN");
 
+  const [dlPdf, setDlPdf] = useState(false);
+  const [dlCsv, setDlCsv] = useState(false);
+  const [dlDrive, setDlDrive] = useState(false);
+  const [driveMsg, setDriveMsg] = useState<string | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setFile(acceptedFiles[0]);
       setPreview(URL.createObjectURL(acceptedFiles[0]));
       setError(null);
       setResult(null);
+      setDriveMsg(null);
+      setDlError(null);
     }
   }, []);
 
@@ -129,6 +188,8 @@ export default function CspPage() {
     if (!file) return;
     setLoading(true);
     setError(null);
+    setDriveMsg(null);
+    setDlError(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -142,18 +203,40 @@ export default function CspPage() {
         body: formData,
         headers: apiHeaders() as HeadersInit,
       });
-
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { detail?: string }).detail ?? `Failed (${res.status})`);
       }
-
       setResult(await res.json() as CspResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analysis failed");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!result) return;
+    setDlPdf(true); setDlError(null);
+    try { await downloadCspPdf(result); }
+    catch (e) { setDlError(e instanceof Error ? e.message : "PDF download failed"); }
+    finally { setDlPdf(false); }
+  };
+
+  const handleDownloadCsv = async () => {
+    if (!result) return;
+    setDlCsv(true); setDlError(null);
+    try { await downloadCspCsv(result); }
+    catch (e) { setDlError(e instanceof Error ? e.message : "CSV download failed"); }
+    finally { setDlCsv(false); }
+  };
+
+  const handleSaveDrive = async () => {
+    if (!result) return;
+    setDlDrive(true); setDlError(null); setDriveMsg(null);
+    try { setDriveMsg(await saveToDrive(result)); }
+    catch (e) { setDlError(e instanceof Error ? e.message : "Drive save failed"); }
+    finally { setDlDrive(false); }
   };
 
   return (
@@ -220,10 +303,12 @@ export default function CspPage() {
       )}
 
       <Button size="lg" className="w-full sm:w-auto min-h-12" onClick={handleAnalyze} disabled={!file || loading}>
-        {loading ? <><Loader2 className="h-5 w-5 animate-spin mr-2" />Analyzing cotton…</> : <><FlaskConical className="mr-2 h-4 w-4" />Run CSP Analysis</>}
+        {loading
+          ? <><Loader2 className="h-5 w-5 animate-spin mr-2" />Analyzing cotton…</>
+          : <><FlaskConical className="mr-2 h-4 w-4" />Run CSP Analysis</>}
       </Button>
 
-      {/* Results */}
+      {/* ── Results ─────────────────────────────────────────────────── */}
       {result && (
         <div className="space-y-6">
           {/* CSP Score hero */}
@@ -264,9 +349,66 @@ export default function CspPage() {
             </CardContent>
           </Card>
 
+          {/* ── Download bar ──────────────────────────────────────────── */}
+          <Card>
+            <CardContent className="pt-5 pb-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2 text-sm font-medium mr-2">
+                  <Download className="h-4 w-4" />
+                  Download report
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadPdf}
+                    disabled={dlPdf}
+                    className="gap-2"
+                  >
+                    {dlPdf
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <FileText className="h-4 w-4 text-red-500" />}
+                    Download PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadCsv}
+                    disabled={dlCsv}
+                    className="gap-2"
+                  >
+                    {dlCsv
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <FileSpreadsheet className="h-4 w-4 text-green-600" />}
+                    Download CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveDrive}
+                    disabled={dlDrive}
+                    className="gap-2"
+                  >
+                    {dlDrive
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <HardDrive className="h-4 w-4 text-blue-500" />}
+                    Save to Drive
+                  </Button>
+                </div>
+              </div>
+              {driveMsg && (
+                <p className="mt-2 text-sm text-green-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4" />{driveMsg}
+                </p>
+              )}
+              {dlError && (
+                <p className="mt-2 text-sm text-destructive">{dlError}</p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Metrics + Benchmark */}
           <div className="grid md:grid-cols-2 gap-6">
-            {/* CV Metrics */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -282,7 +424,6 @@ export default function CspPage() {
               </CardContent>
             </Card>
 
-            {/* USTER Benchmark */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -302,9 +443,6 @@ export default function CspPage() {
                       <div className={`h-2 w-2 rounded-full shrink-0 ${row.color}`} />
                       <span className="flex-1 text-muted-foreground">{row.label}</span>
                       <span className="font-mono font-semibold">{row.value}</span>
-                      {result.csp >= row.value && result.benchmark.uster_percentile !== "—" && (
-                        <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                      )}
                     </div>
                   ))}
                   <div className="pt-3 border-t">

@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from reports.csp_report_generator import generate_csp_csv, generate_csp_pdf
 from reports.ttdc_report_generator import generate_csv_export, generate_ttdc_pdf
 from services.batch_statistics import BatchStatistics
 from services.csp_analyzer import CspAnalyzer
@@ -143,6 +144,24 @@ async def csp_report(
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CSP analysis failed: {str(e)}") from e
+
+
+@router.post("/csp-report/pdf")
+async def csp_pdf(data: dict):
+    try:
+        pdf_b64 = generate_csp_pdf(data)
+        return {"pdf_base64": pdf_b64}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSP PDF failed: {str(e)}") from e
+
+
+@router.post("/csp-report/csv")
+async def csp_csv(data: dict):
+    try:
+        csv_text = generate_csp_csv(data)
+        return PlainTextResponse(content=csv_text, media_type="text/csv")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSP CSV failed: {str(e)}") from e
 
 
 @router.get("/auth/google")
