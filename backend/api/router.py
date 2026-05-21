@@ -7,11 +7,13 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from reports.ttdc_report_generator import generate_csv_export, generate_ttdc_pdf
 from services.batch_statistics import BatchStatistics
+from services.csp_analyzer import CspAnalyzer
 from services.material_analyzer import METRIC_COLUMNS, MaterialAnalyzer
 
 router = APIRouter()
 analyzer = MaterialAnalyzer()
 batch_engine = BatchStatistics()
+csp_engine = CspAnalyzer()
 
 
 def _workspace_id(request: Request) -> str:
@@ -112,6 +114,35 @@ async def export_csv(data: dict):
         return PlainTextResponse(content=csv_text, media_type="text/csv")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CSV export failed: {str(e)}") from e
+
+
+@router.post("/csp-report")
+async def csp_report(
+    request: Request,
+    file: UploadFile = File(...),
+    lot_id: Optional[str] = Form(None),
+    mill_name: Optional[str] = Form(None),
+    operator: Optional[str] = Form("MMN"),
+):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    image_bytes = await file.read()
+
+    try:
+        result = csp_engine.analyze(image_bytes)
+        result["analysis_id"] = f"CSP-{uuid.uuid4().hex[:10].upper()}"
+        result["timestamp"] = time.strftime("%d/%m/%Y %H:%M:%S", time.gmtime())
+        result["workspace_id"] = _workspace_id(request)
+        result["report_meta"] = {
+            "lot_id": lot_id or "SINGLE",
+            "mill_name": mill_name or "",
+            "operator": operator or "MMN",
+            "serial_no": str(uuid.uuid4().int)[:7],
+        }
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSP analysis failed: {str(e)}") from e
 
 
 @router.get("/auth/google")

@@ -9,6 +9,7 @@ import {
   Sun,
   Menu,
   X,
+  Wheat,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ const NAV = [
   { href: "/", label: "Home", icon: Home },
   { href: "/analyze", label: "Analyze", icon: Upload },
   { href: "/compare", label: "Compare", icon: GitCompare },
+  { href: "/csp", label: "CSP Report", icon: Wheat },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ] as const;
 
