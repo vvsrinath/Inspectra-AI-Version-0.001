@@ -146,6 +146,82 @@ async def csp_report(
         raise HTTPException(status_code=500, detail=f"CSP analysis failed: {str(e)}") from e
 
 
+@router.post("/csp-compare")
+async def csp_compare(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    sample_names: str = Form(""),
+    lot_id: str = Form(""),
+    mill_name: str = Form(""),
+    operator: str = Form("MMN"),
+):
+    if len(files) < 2 or len(files) > 10:
+        raise HTTPException(status_code=400, detail="Upload 2–10 cotton samples")
+    names = [n.strip() for n in sample_names.split(",") if n.strip()]
+    results = []
+    for i, f in enumerate(files):
+        if not f.content_type or not f.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"File {i+1} is not an image")
+        image_bytes = await f.read()
+        try:
+            r = csp_engine.analyze(image_bytes)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Analysis failed for sample {i+1}: {str(e)}") from e
+        r["analysis_id"] = f"CSP-{uuid.uuid4().hex[:8].upper()}"
+        r["timestamp"]   = time.strftime("%d/%m/%Y %H:%M:%S", time.gmtime())
+        r["workspace_id"]= _workspace_id(request)
+        r["sample_name"] = names[i] if i < len(names) else f"Sample {i+1}"
+        r["filename"]    = f.filename or f"sample_{i+1}"
+        r["report_meta"] = {
+            "lot_id": lot_id or f"S{i+1:02d}",
+            "mill_name": mill_name or "",
+            "operator": operator or "MMN",
+            "serial_no": str(uuid.uuid4().int)[:7],
+        }
+        results.append(r)
+
+    import numpy as _np
+    NUM_FIELDS = [
+        "csp","estimated_ne","strength_factor","uniformity_index","micronaire",
+        "nep_index","short_fiber_index","hairiness_index","elongation_index",
+        "uhml_inches","mean_length_inches","sfc_n","sfc_w","sci","ipi",
+        "rd","plus_b","trash_percent","maturity_ratio","cover_factor",
+    ]
+    # For these fields, higher = better
+    HIGHER_BETTER = {"csp","estimated_ne","strength_factor","uniformity_index",
+                     "elongation_index","uhml_inches","mean_length_inches","sci",
+                     "rd","maturity_ratio","cover_factor"}
+    stats = {}
+    for field in NUM_FIELDS:
+        vals = [r.get(field, 0) for r in results if isinstance(r.get(field), (int, float))]
+        if vals:
+            arr = _np.array(vals, dtype=float)
+            mean_v = float(_np.mean(arr))
+            stats[field] = {
+                "mean":       round(mean_v, 2),
+                "std":        round(float(_np.std(arr)), 2),
+                "cv_percent": round(float(_np.std(arr) / mean_v * 100) if mean_v else 0, 1),
+                "min":        round(float(_np.min(arr)), 2),
+                "max":        round(float(_np.max(arr)), 2),
+                "best_idx":   int(_np.argmax(arr)) if field in HIGHER_BETTER else int(_np.argmin(arr)),
+                "worst_idx":  int(_np.argmin(arr)) if field in HIGHER_BETTER else int(_np.argmax(arr)),
+            }
+    ranked = sorted(range(len(results)), key=lambda i: results[i]["csp"], reverse=True)
+    for rank, idx in enumerate(ranked):
+        results[idx]["rank"] = rank + 1
+
+    return JSONResponse(content={
+        "results":      results,
+        "stats":        stats,
+        "sample_count": len(results),
+        "compare_id":   f"CMP-{uuid.uuid4().hex[:10].upper()}",
+        "timestamp":    time.strftime("%d/%m/%Y %H:%M:%S", time.gmtime()),
+        "lot_id":       lot_id,
+        "mill_name":    mill_name,
+        "operator":     operator,
+    })
+
+
 @router.post("/csp-report/pdf")
 async def csp_pdf(data: dict):
     try:

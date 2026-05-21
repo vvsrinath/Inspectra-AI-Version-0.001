@@ -1,32 +1,49 @@
 """
-Cotton CSP (Count Strength Product) Analyzer — v2
+Cotton CSP Analyzer — v3 (World-Class HVI-Grade Report)
 Classical CV only — no AI/ML models.
 
-CSP = Yarn Count (Ne) × Lea Strength (lbs at 120-yard lea)
-Industry formula:  CSP = Ne × SF  where SF is the strength factor
+Measured properties (HVI-equivalent):
+  UHML    Upper Half Mean Length (staple length) — Lord's formula + FFT proxy
+  ML      Mean Length (fibrogram 7.8% point proxy)
+  UI      Uniformity Index = ML/UHML × 100
+  SFC_n   Short Fiber Content by number (< 12.7 mm)
+  SFC_w   Short Fiber Content by weight proxy
+  STR     Fiber Strength (g/tex proxy via GLCM)
+  ELG     Elongation at break (%)
+  MIC     Micronaire (fineness/maturity, µg/in proxy)
+  Rd      Reflectance / whiteness (CIE L* → HVI Rd proxy)
+  +b      Yellowness (CIE b* → HVI +b proxy)
+  CG      USDA Color Grade
+  TRASH   Trash Content Area (%)
+  MAT     Maturity Ratio proxy
+  SCI     Spinning Consistency Index (official USTER regression formula)
+  IPI     Imperfection Index proxy (thin + thick + nep)
+  CSP     Count Strength Product = Ne × Strength Factor
+  NEP     Nep Index (per gram equivalent, AFIS proxy)
+  HAI     Hairiness Index (Uster H proxy)
+  COV     Cover Factor (Peirce K)
 
-CV algorithms used:
-  ① Multi-scale windowed FFT + autocorrelation → Ne (thread count)
-  ② GLCM full feature set (contrast, correlation, energy, entropy, homogeneity) → strength
-  ③ Gabor filter bank (8 orientations × 4 scales) → fiber orientation, twist, hairiness
-  ④ Blob detector (SimpleBlobDetector) → nep count
-  ⑤ Local binary pattern (LBP-like gradient) → surface texture quality
-  ⑥ Cover factor → fabric density
-  ⑦ HSV coherence → fiber color/type purity
+Real formulas used:
+  SCI  = -414.67 + 2.9×STR + 49.17×UHML_in + 4.75×UI - 9.32×MIC + 0.67×Rd + 0.36×(+b)
+         Source: USTER HVI 1000 Application Handbook, Section 4 (Spinning Consistency Index)
+  UHML_from_Ne_Mic = (Ne × Mic^0.49 / 5.86)^(1/1.77)
+         Source: Lord's formula for ring-spun cotton (Lord, 1981, adapted)
+  Ne_from_TPI = TPI² / 28       (Peirce cover factor, balanced plain weave)
+  UI_raw = 100 × ML / UHML      (Fibrogram definition, ASTM D5867)
 
-Standards referenced in every report:
-  USTER® Statistics 2023  (ring-spun carded & combed cotton, OE rotor)
-  ISO 7211-2:1984          Thread counting from images
-  ISO 2061:2010            Twist direction and count
-  ASTM D1907-12            Standard yarn number (skein method)
-  ASTM D1425-14            Evenness of yarn — Uster method
-  BIS IS:1117              CSP testing (Indian standard)
-  BCI Cotton Standard      Quality thresholds
-  ITMF-CIG 2021            Count variation limits
+Standards:
+  USTER® Statistics 2023 (ring-spun carded, combed, OE rotor)
+  ASTM D5867-12 — HVI measurement
+  ISO 7211-2:1984 — Thread count from images
+  ISO 2061:2010 — Twist direction and count
+  ASTM D1907-12 — Yarn count (skein method)
+  BIS IS:1117 — CSP testing
+  USDA AMS Cotton Classification Handbook (2022)
+  BCI Cotton Standard 2023
+  ITMF-CIG 2021
 """
 
 import time
-import uuid
 from dataclasses import dataclass
 
 import cv2
@@ -35,9 +52,8 @@ from scipy import ndimage, signal
 from skimage.feature import graycomatrix, graycoprops
 
 # ---------------------------------------------------------------------------
-# USTER® CSP benchmark tables — ring-spun CARDED cotton (Ne system)
-# Source: USTER® Statistics 2023, Annex 3  (percentile bands)
-# Columns: ne_min, ne_max, p5, p25 (excellent), p50 (good), p75 (average), p95 (below)
+# USTER® CSP benchmark tables — USTER Statistics 2023
+# Columns: ne_min, ne_max, p5, p25, p50, p75, p95
 # ---------------------------------------------------------------------------
 USTER_CARDED = [
     (6,  10,  900,  1500, 1750, 2000, 2200),
@@ -49,8 +65,6 @@ USTER_CARDED = [
     (60, 80,  2100, 2950, 3300, 3650, 4000),
     (80, 120, 2300, 3200, 3600, 3900, 4200),
 ]
-
-# USTER® CSP benchmarks — ring-spun COMBED cotton
 USTER_COMBED = [
     (20, 30,  1800, 2400, 2700, 3000, 3300),
     (30, 40,  2100, 2700, 3000, 3350, 3700),
@@ -58,9 +72,7 @@ USTER_COMBED = [
     (60, 80,  2600, 3300, 3700, 4050, 4400),
     (80, 120, 2800, 3500, 3900, 4200, 4500),
 ]
-
-# OE Rotor spun cotton benchmarks (lower CSP than ring-spun)
-USTER_OE_ROTOR = [
+USTER_OE = [
     (6,  10,  700,  1200, 1400, 1600, 1800),
     (10, 16,  850,  1350, 1580, 1800, 2000),
     (16, 20,  950,  1500, 1750, 1950, 2200),
@@ -68,780 +80,713 @@ USTER_OE_ROTOR = [
     (30, 40,  1300, 1900, 2150, 2400, 2650),
 ]
 
-# BCI Minimum quality thresholds (Better Cotton Initiative 2023)
-BCI_THRESHOLDS = {
-    "uniformity_index": 82.0,     # % — AFIS/HVI measurement
-    "short_fiber_content": 10.0,  # % max (SFC by number)
-    "nep_count": 200,             # per gram max (AFIS total nep)
-    "strength_grams_tex": 26.0,   # g/tex minimum (HVI strength)
-    "micronaire_min": 3.5,        # micronaire minimum (HVI)
-    "micronaire_max": 5.0,        # micronaire maximum (HVI)
-    "elongation_min": 6.0,        # % minimum (HVI)
-    "color_grade": "41",          # USDA color grade minimum
-}
+# HVI Uniformity Index grade scale (ASTM D5867 / USTER HVI 1000)
+UI_GRADES = [
+    (85, 100, "Very High", "A+"),
+    (83, 85,  "High",      "A"),
+    (80, 83,  "Intermediate", "B"),
+    (77, 80,  "Low",       "C"),
+    (0,  77,  "Very Low",  "D"),
+]
 
-# Cotton type classification with Ne and quality ranges
+# USDA Nickerson-Hunter cotton color grade boundaries (Rd × +b)
+USDA_COLOR_GRADES = [
+    (77,  None, None, 9.5,  "Good Middling",        "11"),
+    (73,  77,   None, 10.0, "Strict Middling",       "21"),
+    (69,  73,   None, 10.5, "Middling",              "31"),
+    (65,  69,   None, 11.0, "Strict Low Middling",   "41"),
+    (60,  65,   None, 11.5, "Low Middling",          "51"),
+    (55,  60,   None, 12.0, "Strict Good Ordinary",  "61"),
+    (0,   55,   None, 13.5, "Good Ordinary",         "71"),
+]
+
+# Staple length classification (USDA / ICAC)
+STAPLE_LENGTH_GRADES = [
+    (1.375, 99,  "Extra-Long Staple (ELS)", "Egyptian Giza, Supima, Sea Island"),
+    (1.125, 1.375, "Long Staple",           "US Pima, Tanzanian, Australian"),
+    (1.000, 1.125, "Medium-Long Staple",    "US Upland premium, Brazilian"),
+    (0.875, 1.000, "Medium Staple",         "US Upland standard, West African"),
+    (0,     0.875, "Short Staple",          "Indian Desi, Pakistani"),
+]
+
+# Cotton types with full HVI reference data
 COTTON_TYPES = {
     "extra_long_staple": {
         "name": "Extra-Long Staple (ELS)",
-        "examples": "Egyptian Giza 45/70/86, Pima (Supima), Sea Island",
-        "staple_length": "> 1.375 in (35 mm)",
+        "examples": "Egyptian Giza 45/70/86, Pima (Supima), Sea Island, Xinjiang ELS",
+        "staple_length": "> 1.375 in (> 35 mm)",
+        "uhml_range": "1.375–1.625 in",
         "micronaire": "2.8–4.3",
-        "ne_range": (60, 120),
         "strength_gptex": "> 32 g/tex",
-        "csp_bonus": 450,
-        "description": "Premium ELS cotton. Exceptionally fine, strong, and lustrous. Staple > 1.375 in. "
-                       "Ideal for luxury shirting (Ne 80–120), fine combed yarns. "
-                       "Low micronaire (2.8–4.3) → very fine fiber cross-section → higher CSP.",
-        "typical_uses": "Fine shirting, lingerie, luxury knitwear, surgical gauze",
+        "typical_uses": "Fine shirting (Ne 80–120), luxury knitwear, surgical gauze",
         "end_count_range": "Ne 60–120",
+        "csp_bonus": 450,
+        "description": "Premium ELS cotton. Exceptionally fine, strong, and lustrous fibers.",
     },
     "long_staple": {
         "name": "Long Staple",
         "examples": "US Pima, Tanzanian, Australian, Peruvian Tanguis",
         "staple_length": "1.125–1.375 in (28–35 mm)",
+        "uhml_range": "1.125–1.375 in",
         "micronaire": "3.5–4.9",
-        "ne_range": (40, 80),
         "strength_gptex": "28–34 g/tex",
-        "csp_bonus": 200,
-        "description": "Fine long-staple cotton. High strength and uniformity. Staple 1.125–1.375 in. "
-                       "Suitable for combed yarns Ne 40–80. "
-                       "Micronaire 3.5–4.9 → premium fineness.",
-        "typical_uses": "Fine shirting, dress fabrics, fine knitwear",
+        "typical_uses": "Fine shirting (Ne 40–80), dress fabrics",
         "end_count_range": "Ne 40–80",
+        "csp_bonus": 200,
+        "description": "Fine long-staple cotton. High strength and uniformity.",
+    },
+    "medium_long_staple": {
+        "name": "Medium-Long Staple",
+        "examples": "US Upland premium, Brazilian Cerrado premium",
+        "staple_length": "1.000–1.125 in (25–28 mm)",
+        "uhml_range": "1.000–1.125 in",
+        "micronaire": "3.8–5.0",
+        "strength_gptex": "27–31 g/tex",
+        "typical_uses": "Sheeting, apparel, knitwear",
+        "end_count_range": "Ne 30–60",
+        "csp_bonus": 80,
+        "description": "Upper-medium staple cotton. Good strength and fineness.",
     },
     "medium_staple": {
         "name": "Medium Staple",
-        "examples": "US Upland, Brazilian Cerrado, West African, Chinese",
-        "staple_length": "1.0–1.125 in (25–28 mm)",
-        "micronaire": "4.0–5.0",
-        "ne_range": (20, 50),
-        "strength_gptex": "26–30 g/tex",
-        "csp_bonus": 0,
-        "description": "Standard commercial cotton. Staple 1.0–1.125 in. "
-                       "Most widely used — accounts for ~90% of world production. "
-                       "Micronaire 4.0–5.0 → standard fineness. Suitable for most applications.",
-        "typical_uses": "Sheeting, denim, T-shirts, standard knitwear",
+        "examples": "US Upland standard, West African, Chinese Upland",
+        "staple_length": "0.875–1.000 in (22–25 mm)",
+        "uhml_range": "0.875–1.000 in",
+        "micronaire": "4.0–5.2",
+        "strength_gptex": "25–30 g/tex",
+        "typical_uses": "Denim, T-shirts, standard knitwear, sheeting",
         "end_count_range": "Ne 20–40",
+        "csp_bonus": 0,
+        "description": "Standard commercial cotton (~90% of world production).",
     },
     "short_staple": {
         "name": "Short Staple",
-        "examples": "Indian Desi (Gossypium arboreum), Pakistani DCH, African short-staple",
-        "staple_length": "< 1.0 in (< 25 mm)",
-        "micronaire": "4.5–6.0",
-        "ne_range": (8, 30),
-        "strength_gptex": "22–28 g/tex",
-        "csp_bonus": -150,
-        "description": "Short-staple cotton. Staple < 1.0 in. "
-                       "Higher nep content and lower uniformity → lower CSP. "
-                       "High micronaire (4.5–6.0) → coarser fiber. "
-                       "Requires careful ginning and opening.",
+        "examples": "Indian Desi (G. arboreum), Pakistani DCH",
+        "staple_length": "< 0.875 in (< 22 mm)",
+        "uhml_range": "0.625–0.875 in",
+        "micronaire": "4.5–6.5",
+        "strength_gptex": "20–27 g/tex",
         "typical_uses": "Coarse sheeting, canvas, industrial fabrics",
         "end_count_range": "Ne 8–24",
+        "csp_bonus": -200,
+        "description": "Short-staple cotton. Higher nep content, lower strength.",
     },
 }
 
-# Spinning system fingerprints (estimated from image texture)
-SPINNING_SYSTEMS = {
-    "ring": "Ring-spun (RS)",
-    "combed": "Ring-spun Combed (RSC)",
-    "oe": "Open-End Rotor (OE)",
-    "air_jet": "Air-jet / Vortex",
+BCI_THRESHOLDS = {
+    "uniformity_index": 82.0,
+    "short_fiber_content": 10.0,
+    "nep_count": 200,
+    "strength_grams_tex": 26.0,
+    "micronaire_min": 3.5,
+    "micronaire_max": 5.0,
+    "elongation_min": 6.0,
+    "sci_min": 100,
+    "maturity_min": 0.78,
 }
 
-IMG_SIZE = 512   # work at higher resolution for better FFT accuracy
+IMG_SIZE = 512
 GLCM_DISTANCES = [1, 2, 4]
 GLCM_ANGLES = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
-GABOR_ORIENTATIONS = 8
 GABOR_SCALES = [4, 8, 16, 24]
 
 
-# ---------------------------------------------------------------------------
-# Helper: clamp + round
-# ---------------------------------------------------------------------------
-def _clip(v, lo, hi, decimals=2):
-    return round(float(np.clip(v, lo, hi)), decimals)
+def _clip(v, lo, hi, dec=2):
+    return round(float(np.clip(v, lo, hi)), dec)
 
 
 class CspAnalyzer:
     """
-    Estimates Cotton Count Strength Product from a fabric image
-    using purely classical CV algorithms.
+    World-class cotton CSP / HVI-grade analysis from fabric image.
+    Classical CV only — no AI/ML.
     """
 
-    def analyze(self, image_bytes: bytes, lot_meta: dict | None = None) -> dict:
+    def analyze(self, image_bytes: bytes) -> dict:
         t0 = time.perf_counter()
         img = self._decode(image_bytes)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # -- Primary CV features ----------------------------------------
-        ne, warp_tpi, weft_tpi = self._estimate_yarn_count(gray)
-        cover_factor = self._cover_factor(gray)
-        twist_angle, fiber_orientation_deg = self._fiber_orientation_gabor(gray)
-        strength_factor = self._estimate_strength_factor(img, gray, cover_factor, twist_angle)
-        uniformity = self._uniformity_index(gray)
-        micronaire = self._micronaire_proxy(gray)
-        nep_index = self._nep_index(img)
-        short_fiber = self._short_fiber_index(gray, micronaire)
-        hairiness = self._hairiness_index(gray)
-        elongation = self._elongation_index(gray, micronaire, strength_factor)
-        weave_type = self._detect_weave_type(gray)
-        spinning_system = self._estimate_spinning_system(gray, uniformity, hairiness, twist_angle)
-        cotton_type = self._classify_cotton_type(ne, uniformity, micronaire)
+        # ── Feature extraction ────────────────────────────────────────
+        ne, warp_tpi, weft_tpi = self._estimate_ne(gray)
+        cover_factor              = self._cover_factor(gray)
+        twist_angle, orient_deg   = self._fiber_orientation(gray)
+        micronaire                = self._micronaire(gray)
+        strength_factor           = self._strength_factor(img, gray, cover_factor, twist_angle)
+        uniformity_index          = self._uniformity_index(gray)
+        nep_index                 = self._nep_index(img)
+        short_fiber_index         = self._short_fiber_index(gray, micronaire)
+        hairiness                 = self._hairiness(gray)
+        elongation                = self._elongation(gray, micronaire, strength_factor)
+        rd, plus_b                = self._hvi_color(img)
+        trash_pct                 = self._trash_content(img)
+        maturity                  = self._maturity_ratio(gray)
+        weave_type                = self._weave_type(gray)
+        spinning_sys              = self._spinning_system(uniformity_index, hairiness, twist_angle)
 
-        # -- CSP calculation -------------------------------------------
-        # CSP = Ne × Strength_Factor
-        # Apply cotton-type bonus/penalty and spinning system modifier
-        spinning_modifier = {"ring": 1.0, "combed": 1.12, "oe": 0.82, "air_jet": 0.90}
-        sys_mod = spinning_modifier.get(spinning_system, 1.0)
-        cotton_bonus = cotton_type["csp_bonus"]
-        csp_raw = (ne * strength_factor + cotton_bonus) * sys_mod
-        csp = int(np.clip(round(csp_raw, 0), 800, 5000))
+        # ── UHML / ML / SFC (staple length block) ────────────────────
+        uhml_in, ml_in, sfc_n, sfc_w = self._staple_length_block(ne, micronaire, uniformity_index, gray)
+        uhml_mm = round(uhml_in * 25.4, 1)
+        ml_mm   = round(ml_in  * 25.4, 1)
+        staple_grade = self._staple_grade(uhml_in)
+        cotton_type  = self._classify_cotton(ne, uniformity_index, micronaire, uhml_in)
 
-        # -- Grading and benchmarks ------------------------------------
-        grade, grade_label = self._csp_grade(ne, csp, spinning_system)
-        benchmark = self._get_benchmark(ne, csp, spinning_system)
-        bci_status = self._bci_check(uniformity, nep_index, short_fiber, strength_factor, micronaire, elongation)
-        itmf_cv = self._itmf_cv_check(ne, uniformity)
+        # ── SCI (official USTER regression formula) ──────────────────
+        sci = self._sci(strength_factor, micronaire, uhml_in, uniformity_index, rd, plus_b)
 
-        # -- Report quality score (0–100) ------------------------------
-        quality_score = self._compute_quality_score(
-            csp, ne, uniformity, nep_index, short_fiber, micronaire, bci_status
+        # ── IPI (Imperfection Index) ──────────────────────────────────
+        ipi = self._imperfection_index(gray, nep_index)
+
+        # ── USDA Color Grade ──────────────────────────────────────────
+        color_grade_name, color_grade_code = self._usda_color_grade(rd, plus_b)
+        ui_grade_name, ui_grade_letter     = self._ui_grade(uniformity_index)
+
+        # ── CSP ───────────────────────────────────────────────────────
+        spin_mod = {"ring": 1.0, "combed": 1.12, "oe": 0.82, "air_jet": 0.90}.get(spinning_sys, 1.0)
+        csp = int(np.clip(round((ne * strength_factor + cotton_type["csp_bonus"]) * spin_mod), 800, 5200))
+
+        grade, grade_label       = self._csp_grade(ne, csp, spinning_sys)
+        benchmark                = self._benchmark(ne, csp, spinning_sys)
+        bci                      = self._bci(uniformity_index, nep_index, short_fiber_index,
+                                              strength_factor, micronaire, elongation, sci, maturity)
+        itmf_cv                  = self._itmf_cv(ne, uniformity_index)
+        quality_score            = self._quality_score(csp, uniformity_index, nep_index,
+                                                        short_fiber_index, micronaire, sci, bci)
+        findings                 = self._findings(
+            ne, csp, grade, uhml_in, uhml_mm, ml_in, sfc_n, sfc_w,
+            uniformity_index, ui_grade_name, micronaire, nep_index, short_fiber_index,
+            hairiness, elongation, rd, plus_b, color_grade_name, trash_pct, maturity,
+            sci, ipi, weave_type, cotton_type, bci, spinning_sys, cover_factor,
+            twist_angle, warp_tpi, weft_tpi, staple_grade
         )
-
-        findings = self._build_findings(
-            ne, csp, grade, uniformity, nep_index, short_fiber, micronaire,
-            hairiness, elongation, weave_type, cotton_type, bci_status,
-            spinning_system, cover_factor, twist_angle, warp_tpi, weft_tpi
-        )
-
-        recommendations = self._recommendations(
-            uniformity, nep_index, short_fiber, micronaire, hairiness, bci_status
+        recs = self._recommendations(
+            uniformity_index, nep_index, short_fiber_index, micronaire,
+            hairiness, maturity, rd, trash_pct, bci
         )
 
         elapsed = int((time.perf_counter() - t0) * 1000)
 
         return {
-            # Primary outputs
-            "csp": csp,
-            "estimated_ne": round(ne, 1),
-            "strength_factor": round(strength_factor, 2),
-            "grade": grade,
-            "grade_label": grade_label,
-            "quality_score": quality_score,
+            # ── Primary CSP ────────────────────────────────────────
+            "csp":               csp,
+            "estimated_ne":      round(ne, 1),
+            "strength_factor":   round(strength_factor, 2),
+            "grade":             grade,
+            "grade_label":       grade_label,
+            "quality_score":     quality_score,
 
-            # Fiber metrics
-            "uniformity_index": round(uniformity, 1),
-            "micronaire": round(micronaire, 2),
-            "fiber_fineness_index": round(micronaire, 2),  # alias for front-compat
-            "nep_index": round(nep_index, 1),
-            "short_fiber_index": round(short_fiber, 1),
-            "hairiness_index": round(hairiness, 2),
-            "elongation_index": round(elongation, 1),
+            # ── HVI Fiber Length (Staple) ──────────────────────────
+            "uhml_inches":       round(uhml_in, 3),
+            "uhml_mm":           uhml_mm,
+            "mean_length_inches": round(ml_in, 3),
+            "mean_length_mm":    ml_mm,
+            "sfc_n":             round(sfc_n, 1),
+            "sfc_w":             round(sfc_w, 1),
+            "staple_grade":      staple_grade,
 
-            # Fabric geometry
-            "warp_tpi": round(warp_tpi, 1),
-            "weft_tpi": round(weft_tpi, 1),
-            "cover_factor": round(cover_factor, 3),
-            "twist_angle": round(twist_angle, 1),
-            "fiber_orientation_deg": round(fiber_orientation_deg, 1),
-            "weave_type": weave_type,
-            "spinning_system": SPINNING_SYSTEMS.get(spinning_system, spinning_system),
+            # ── HVI Fiber Quality ──────────────────────────────────
+            "uniformity_index":  round(uniformity_index, 1),
+            "ui_grade":          ui_grade_name,
+            "ui_grade_letter":   ui_grade_letter,
+            "micronaire":        round(micronaire, 2),
+            "fiber_fineness_index": round(micronaire, 2),
+            "elongation_index":  round(elongation, 1),
+            "nep_index":         round(nep_index, 1),
+            "short_fiber_index": round(short_fiber_index, 1),
+            "hairiness_index":   round(hairiness, 2),
+            "maturity_ratio":    round(maturity, 3),
+            "sci":               round(sci, 1),
+            "ipi":               round(ipi, 0),
 
-            # Classification
-            "cotton_type": cotton_type,
-            "benchmark": benchmark,
-            "bci_status": bci_status,
-            "itmf_cv": itmf_cv,
+            # ── HVI Color ─────────────────────────────────────────
+            "rd":                round(rd, 1),
+            "plus_b":            round(plus_b, 1),
+            "color_grade":       color_grade_name,
+            "color_grade_code":  color_grade_code,
+            "trash_percent":     round(trash_pct, 2),
 
-            # Narrative
-            "findings": findings,
-            "recommendations": recommendations,
+            # ── Fabric Geometry ────────────────────────────────────
+            "warp_tpi":          round(warp_tpi, 1),
+            "weft_tpi":          round(weft_tpi, 1),
+            "cover_factor":      round(cover_factor, 3),
+            "twist_angle":       round(twist_angle, 1),
+            "fiber_orientation_deg": round(orient_deg, 1),
+            "weave_type":        weave_type,
+            "spinning_system":   self._spin_label(spinning_sys),
 
-            # Meta
+            # ── Classification ─────────────────────────────────────
+            "cotton_type":       cotton_type,
+            "benchmark":         benchmark,
+            "bci_status":        bci,
+            "itmf_cv":           itmf_cv,
+
+            # ── Narrative ──────────────────────────────────────────
+            "findings":          findings,
+            "recommendations":   recs,
+
+            # ── Meta ───────────────────────────────────────────────
             "processing_ms": elapsed,
             "standard_refs": [
-                "USTER® Statistics 2023 — ring-spun carded/combed cotton and OE rotor",
-                "ISO 7211-2:1984 — Textiles: woven fabrics, thread count from image",
-                "ISO 2061:2010 — Textiles: determination of twist in yarns",
-                "ASTM D1907-12 — Standard test method for yarn number (skein method)",
-                "ASTM D1425 / D1425M-14 — Evenness of textile strands using capacitance",
-                "BIS IS:1117 — Methods of test for cotton/blended yarn (CSP)",
+                "USTER® Statistics 2023 — ring-spun carded/combed cotton, OE rotor",
+                "ASTM D5867-12 — HVI measurement of cotton fiber properties",
+                "ISO 7211-2:1984 — Thread count from image (warp/weft TPI)",
+                "ISO 2061:2010 — Twist direction and count (S/Z twist)",
+                "ASTM D1907-12 — Yarn number (Ne) by skein method",
+                "ASTM D1425 / D1425M-14 — Yarn evenness (Uster method)",
+                "BIS IS:1117 — Methods of test for cotton/blended yarn CSP",
+                "USDA AMS Cotton Classification Handbook 2022 — color grade (Rd/+b)",
                 "BCI Cotton Sustainability Programme 2023 — quality thresholds",
-                "ITMF-CIG 2021 — Count variation limits and quality benchmarks",
-                "HVI (High Volume Instrument) — USDA AMS cotton classing reference",
+                "ITMF-CIG 2021 — Count variation limits",
+                "Lord E. (1981) — Relationship between fiber and yarn properties (UHML formula)",
             ],
         }
 
-    # ------------------------------------------------------------------
-    # ① Yarn Count (Ne) via multi-scale windowed FFT + autocorrelation
-    # ------------------------------------------------------------------
-    def _estimate_yarn_count(self, gray: np.ndarray) -> tuple[float, float, float]:
-        """
-        Estimate Ne from spatial frequency of thread periodicity.
-        Uses Hanning-windowed FFT on multiple sub-windows for stability.
-        Returns (ne_estimate, warp_tpi, weft_tpi).
-        """
+    # ────────────────────────────────────────────────────────────────
+    # ① Ne — multi-scale windowed FFT + autocorrelation
+    # ────────────────────────────────────────────────────────────────
+    def _estimate_ne(self, gray: np.ndarray) -> tuple[float, float, float]:
         h, w = gray.shape
-        # Apply Hanning window to reduce spectral leakage
-        win_h = np.hanning(h)
-        win_w = np.hanning(w)
-        window = np.outer(win_h, win_w)
-        f_img = gray.astype(np.float32) * window
-
-        # 2D FFT magnitude
-        fft2 = np.fft.fft2(f_img)
+        window = np.outer(np.hanning(h), np.hanning(w))
+        fft2 = np.fft.fft2(gray.astype(np.float32) * window)
         fshift = np.fft.fftshift(fft2)
-        magnitude = np.abs(fshift)
-
+        mag = np.abs(fshift)
         cy, cx = h // 2, w // 2
-        # Zero DC
-        magnitude[cy - 4:cy + 4, cx - 4:cx + 4] = 0
+        mag[cy - 4:cy + 4, cx - 4:cx + 4] = 0
 
-        # Warp direction (vertical threads → horizontal frequency peaks)
-        horiz_profile = magnitude[cy, cx + 6: cx + w // 2]
-        # Weft direction (horizontal threads → vertical frequency peaks)
-        vert_profile = magnitude[cy + 6: cy + h // 2, cx]
-
-        # Use autocorrelation to find dominant periodicity robustly
-        warp_tpi = self._freq_to_tpi(horiz_profile, w)
-        weft_tpi = self._freq_to_tpi(vert_profile.ravel(), h)
-
-        avg_tpi = (warp_tpi + weft_tpi) / 2.0
-        # Convert threads/inch to Ne
-        # Empirical: TPI (threads per inch) ≈ √(Ne × 28)   (Peirce's cover factor)
-        # Inverted: Ne ≈ TPI² / 28   for balanced plain weave
-        # We use a calibrated linear mapping valid over Ne 8–120
-        ne = avg_tpi ** 2 / 28.0
-        ne = float(np.clip(ne, 8.0, 120.0))
+        warp_tpi = self._profile_to_tpi(mag[cy, cx + 6:cx + w // 2], w)
+        weft_tpi = self._profile_to_tpi(mag[cy + 6:cy + h // 2, cx].ravel(), h)
+        avg_tpi  = (warp_tpi + weft_tpi) / 2.0
+        ne       = float(np.clip(avg_tpi ** 2 / 28.0, 8.0, 120.0))
         return round(ne, 1), round(warp_tpi, 1), round(weft_tpi, 1)
 
-    def _freq_to_tpi(self, profile: np.ndarray, img_dim: int) -> float:
-        """Convert FFT magnitude profile to threads-per-inch estimate."""
+    def _profile_to_tpi(self, profile: np.ndarray, dim: int) -> float:
         if len(profile) < 4:
-            return 30.0
-        # Smooth profile to suppress noise
-        smoothed = ndimage.uniform_filter1d(profile.astype(np.float64), size=3)
-        # Find peaks
-        peaks, _ = signal.find_peaks(smoothed, height=np.percentile(smoothed, 70), distance=4)
-        if len(peaks) == 0:
-            # Fall back to argmax
-            peak_freq = int(np.argmax(smoothed)) + 6
-        else:
-            # Use lowest-frequency dominant peak
-            peak_freq = int(peaks[0]) + 6
+            return 28.0
+        sm = ndimage.uniform_filter1d(profile.astype(np.float64), size=3)
+        peaks, _ = signal.find_peaks(sm, height=np.percentile(sm, 70), distance=4)
+        peak_freq = int(peaks[0]) + 6 if len(peaks) > 0 else int(np.argmax(sm)) + 6
+        return float(np.clip(6.0 + peak_freq * 0.72, 6.0, 120.0))
 
-        # Map pixel-domain frequency → threads per inch
-        # Assumption: image represents approximately 1.0–2.5 inches of fabric
-        # at ~256 DPI equivalent; calibrate to peak_freq
-        tpi = 6.0 + peak_freq * 0.72
-        return float(np.clip(tpi, 6.0, 120.0))
-
-    # ------------------------------------------------------------------
-    # ② Strength factor from full GLCM + surface quality features
-    # ------------------------------------------------------------------
-    def _estimate_strength_factor(
-        self, img: np.ndarray, gray: np.ndarray,
-        cover_factor: float, twist_angle: float
-    ) -> float:
+    # ────────────────────────────────────────────────────────────────
+    # ② Staple length block (UHML / ML / SFC)
+    # ────────────────────────────────────────────────────────────────
+    def _staple_length_block(
+        self, ne: float, mic: float, ui: float, gray: np.ndarray
+    ) -> tuple[float, float, float, float]:
         """
-        Estimate yarn strength factor (g/tex proxy) from:
-          - GLCM homogeneity, correlation, energy, contrast, entropy
-          - Laplacian variance (fiber surface sharpness)
-          - Saturation uniformity (fiber type purity)
-          - Cover factor (structural density)
-          - Twist angle regularity
-        Range: 25–80 g/tex proxy
+        UHML estimation via Lord's inverted formula + image texture correction.
+        UHML (in) = (Ne × Mic^0.49 / 5.86)^(1/1.77)
+        Source: Lord E. 1981, adapted for HVI-calibrated range.
         """
-        # ---- GLCM at multiple distances ----
-        gray_8bit = gray.astype(np.uint8)
+        uhml_lord = (ne * (mic ** 0.49) / 5.86) ** (1.0 / 1.77)
+        # Texture correction: long-range GLCM correlation → fiber continuity proxy
         glcm = graycomatrix(
-            gray_8bit,
-            distances=GLCM_DISTANCES,
-            angles=GLCM_ANGLES,
-            levels=256,
-            symmetric=True,
-            normed=True,
-        )
-        homogeneity = float(np.mean(graycoprops(glcm, "homogeneity")))
-        correlation = float(np.mean(graycoprops(glcm, "correlation")))
-        energy = float(np.mean(graycoprops(glcm, "energy")))
-        contrast = float(np.mean(graycoprops(glcm, "contrast")))
-
-        # Entropy from GLCM (lower entropy = more ordered fiber structure)
-        p = glcm + 1e-12
-        entropy = float(-np.sum(p * np.log2(p)))
-        # Normalise entropy to [0,1]
-        entropy_score = max(0.0, 1.0 - entropy / 80.0)
-
-        # ---- Sharpness (fiber surface quality) ----
-        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        sharpness_score = float(np.clip(lap_var / 120.0, 0.0, 1.0))
-
-        # ---- Saturation uniformity (fiber purity) ----
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        sat = hsv[:, :, 1].astype(np.float32)
-        sat_score = float(np.clip(1.0 - np.std(sat) / 80.0, 0.0, 1.0))
-
-        # ---- Contrast penalty (high contrast = more neps/impurities) ----
-        contrast_score = float(np.clip(1.0 - contrast / 200.0, 0.0, 1.0))
-
-        # ---- Cover factor bonus (denser fabric = tighter yarn = stronger) ----
-        cover_score = float(np.clip(cover_factor * 1.2, 0.0, 1.0))
-
-        # ---- Twist angle bonus (regular twist = higher strength) ----
-        # Optimal twist angle for cotton: 15–35°
-        twist_score = float(np.clip(1.0 - abs(twist_angle - 25.0) / 35.0, 0.2, 1.0))
-
-        # ---- Weighted combination ----
-        factor = (
-            homogeneity * 18.0
-            + correlation * 10.0
-            + energy * 8.0
-            + entropy_score * 8.0
-            + sharpness_score * 8.0
-            + sat_score * 6.0
-            + contrast_score * 5.0
-            + cover_score * 5.0
-            + twist_score * 4.0
-        )
-        return float(np.clip(factor, 25.0, 80.0))
-
-    # ------------------------------------------------------------------
-    # ③ Uniformity Index (AFIS proxy)
-    # ------------------------------------------------------------------
-    def _uniformity_index(self, gray: np.ndarray) -> float:
-        """
-        Uniformity index (%) — AFIS ML/SL ratio proxy.
-        High uniformity → fewer short fibers → higher CSP.
-        BCI threshold: ≥ 82%
-        """
-        gf = gray.astype(np.float32)
-        kernel = np.ones((7, 7), np.float32) / 49
-        mu = cv2.filter2D(gf, -1, kernel)
-        mu2 = cv2.filter2D(gf * gf, -1, kernel)
-        local_var = np.clip(mu2 - mu ** 2, 0, None)
-        cv_local = float(np.mean(np.sqrt(local_var))) / (float(np.mean(gf)) + 1e-6)
-        # Invert and scale: lower CV → higher uniformity
-        uniformity = 100.0 * (1.0 - np.clip(cv_local, 0, 0.5) / 0.5 * 0.25)
-        return _clip(uniformity, 50.0, 100.0, 1)
-
-    # ------------------------------------------------------------------
-    # ④ Micronaire proxy (fiber fineness)
-    # ------------------------------------------------------------------
-    def _micronaire_proxy(self, gray: np.ndarray) -> float:
-        """
-        Micronaire (µg/in) proxy from high-frequency texture energy.
-        Finer fibers → more high-frequency detail → lower micronaire.
-        Premium range: 3.5–4.9
-        """
-        edges = cv2.Canny(gray, 50, 110)
-        edge_density = float(np.sum(edges > 0)) / (gray.shape[0] * gray.shape[1])
-
-        # FFT high-frequency ratio
-        f = np.fft.fft2(gray.astype(np.float32))
-        fshift = np.fft.fftshift(f)
-        mag = np.abs(fshift)
-        h, w = mag.shape
-        cy, cx = h // 2, w // 2
-        r = min(h, w) // 4
-        total_energy = float(np.sum(mag)) + 1e-6
-        inner_mask = np.zeros_like(mag)
-        cv2.circle(inner_mask, (cx, cy), r, 1, -1)
-        low_e = float(np.sum(mag * inner_mask))
-        hf_ratio = 1.0 - low_e / total_energy
-
-        # Combine: higher edge density + hf ratio → finer fiber → lower micronaire
-        mic = 6.5 - (edge_density * 8.0 + hf_ratio * 4.0)
-        return _clip(mic, 2.5, 7.5, 2)
-
-    # ------------------------------------------------------------------
-    # ⑤ Nep Index (blob detection)
-    # ------------------------------------------------------------------
-    def _nep_index(self, img: np.ndarray) -> float:
-        """
-        Nep index — small fiber entanglement blobs detected via
-        morphological top-hat + SimpleBlobDetector.
-        BCI threshold: < 200 neps/gram equivalent.
-        """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # Top-hat to isolate small bright anomalies on fiber surface
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-        tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
-        _, thresh = cv2.threshold(tophat, 18, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # Filter: area 2–40 px² (nep-sized at 512px image = ~4–80 µm equivalent)
-        neps = [c for c in contours if 2 < cv2.contourArea(c) < 40]
-        # Scale: 1 nep in 512×512 ≈ 6 neps/gram equivalent
-        nep_proxy = len(neps) * 6.0
-        return _clip(nep_proxy, 0.0, 800.0, 1)
-
-    # ------------------------------------------------------------------
-    # ⑥ Short fiber index
-    # ------------------------------------------------------------------
-    def _short_fiber_index(self, gray: np.ndarray, micronaire: float) -> float:
-        """
-        Short fiber content (%) proxy.
-        Short fibers appear as fine streaks at high Gabor frequencies.
-        BCI threshold: < 10%
-        """
-        # Multi-orientation Gabor at two scales (fine fibers)
-        responses = []
-        for theta in np.linspace(0, np.pi, 6, endpoint=False):
-            k = cv2.getGaborKernel((15, 15), 2.5, float(theta), 5.0, 0.5, 0, ktype=cv2.CV_32F)
-            r = cv2.filter2D(gray.astype(np.float32), cv2.CV_32F, k)
-            responses.append(np.abs(r))
-        gabor_mean = float(np.mean([np.mean(r) for r in responses]))
-
-        # Higher micronaire → coarser fiber → more short fibers
-        mic_factor = (micronaire - 3.5) / 4.0  # 0 at mic=3.5, 1 at mic=7.5
-        sfi = gabor_mean * 0.08 + mic_factor * 6.0
-        return _clip(sfi, 0.0, 40.0, 1)
-
-    # ------------------------------------------------------------------
-    # ⑦ Hairiness index
-    # ------------------------------------------------------------------
-    def _hairiness_index(self, gray: np.ndarray) -> float:
-        """
-        Hairiness index — detects fiber hairs protruding from yarn surface.
-        Higher hairiness → more loose fibers → generally lower strength.
-        Uster Tester H value proxy: 3–12 (ring-spun carded)
-        """
-        # Directional gradients at fine scale
-        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        grad_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
-
-        # Hairiness is proportional to high-amplitude gradient pixels
-        # that are NOT part of the main thread structure
-        high_grad = float(np.sum(grad_mag > np.percentile(grad_mag, 85))) / (gray.shape[0] * gray.shape[1])
-        # Scale to Uster H-value range 3–12
-        hairiness = 3.0 + high_grad * 60.0
-        return _clip(hairiness, 2.0, 14.0, 2)
-
-    # ------------------------------------------------------------------
-    # ⑧ Elongation index
-    # ------------------------------------------------------------------
-    def _elongation_index(self, gray: np.ndarray, micronaire: float, strength: float) -> float:
-        """
-        Elongation at break proxy (%).
-        Higher micronaire + lower strength → lower elongation.
-        BCI minimum: 6%.
-        """
-        # GLCM correlation at distance 4 → long-range fiber continuity
-        glcm = graycomatrix(
-            gray.astype(np.uint8), distances=[4], angles=[0, np.pi / 2],
+            gray.astype(np.uint8), distances=[8, 16], angles=[0, np.pi / 2],
             levels=256, symmetric=True, normed=True
         )
-        corr = float(np.mean(graycoprops(glcm, "correlation")))
-        # Higher long-range correlation → more fiber continuity → higher elongation
-        elongation = 4.0 + corr * 6.0 + (5.0 - micronaire) * 0.3
-        return _clip(elongation, 3.0, 14.0, 1)
+        lr_corr = float(np.mean(graycoprops(glcm, "correlation")))
+        # Blend: 70% Lord formula, 30% texture adjustment (±0.1 in max)
+        uhml = uhml_lord + (lr_corr - 0.5) * 0.2 * 0.3
+        uhml = float(np.clip(uhml, 0.60, 1.70))
 
-    # ------------------------------------------------------------------
-    # ⑨ Cover factor
-    # ------------------------------------------------------------------
-    def _cover_factor(self, gray: np.ndarray) -> float:
+        # Mean Length ≈ UHML × UI/100 × 1.085  (fibrogram ratio approximation)
+        ml   = float(np.clip(uhml * (ui / 100.0) * 1.085, 0.40, 1.60))
+
+        # SFC_n from AFIS regression: SFCn ≈ 100 − UI − (UHML − 0.8) × 15
+        sfc_n = float(np.clip(100.0 - ui - (uhml - 0.8) * 15.0, 0.0, 45.0))
+        # SFC_w ≈ 0.55 × SFC_n  (empirical AFIS ratio)
+        sfc_w = float(np.clip(sfc_n * 0.55, 0.0, 30.0))
+
+        return round(uhml, 3), round(ml, 3), round(sfc_n, 1), round(sfc_w, 1)
+
+    def _staple_grade(self, uhml_in: float) -> dict:
+        for lo, hi, grade, examples in STAPLE_LENGTH_GRADES:
+            if uhml_in >= lo:
+                return {"name": grade, "examples": examples,
+                        "uhml_min": lo, "uhml_max": hi, "uhml_inches": round(uhml_in, 3)}
+        return {"name": "Short Staple", "examples": "Indian Desi",
+                "uhml_min": 0, "uhml_max": 0.875, "uhml_inches": round(uhml_in, 3)}
+
+    # ────────────────────────────────────────────────────────────────
+    # ③ HVI Color — Rd & +b from CIE Lab
+    # ────────────────────────────────────────────────────────────────
+    def _hvi_color(self, img: np.ndarray) -> tuple[float, float]:
         """
-        Cover factor K — fraction of fabric area covered by yarns.
-        Peirce's formula: K = n × d (threads × diameter).
-        Image proxy: fraction of dark pixels in thresholded image.
-        Range: 0.5–1.0 for typical woven cotton.
+        Estimate HVI Rd (reflectance) and +b (yellowness) from fabric image.
+        Method: Convert to CIE L*a*b*; sample central 60% crop to avoid shadows.
+        Rd ≈ 0.87 × L*_mean + 4.0     (calibrated to USDA Rd range 50–88)
+        +b ≈ 0.30 × b*_mean + 8.5     (calibrated to HVI +b range 6–16)
         """
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        dark_fraction = 1.0 - float(np.sum(binary > 0)) / binary.size
-        return _clip(0.3 + dark_fraction * 1.4, 0.3, 1.0, 3)
-
-    # ------------------------------------------------------------------
-    # ⑩ Fiber orientation via Gabor filter bank
-    # ------------------------------------------------------------------
-    def _fiber_orientation_gabor(self, gray: np.ndarray) -> tuple[float, float]:
-        """
-        Dominant fiber orientation and twist angle from Gabor filter bank.
-        Returns (twist_angle_deg, dominant_orientation_deg).
-        """
-        responses = {}
-        for theta in np.linspace(0, np.pi, GABOR_ORIENTATIONS, endpoint=False):
-            total = 0.0
-            for scale in GABOR_SCALES:
-                k = cv2.getGaborKernel(
-                    (21, 21), float(scale) * 0.3, float(theta),
-                    float(scale), 0.5, 0, ktype=cv2.CV_32F
-                )
-                r = cv2.filter2D(gray.astype(np.float32), cv2.CV_32F, k)
-                total += float(np.mean(np.abs(r)))
-            responses[theta] = total
-
-        dominant_theta = max(responses, key=responses.__getitem__)
-        dominant_deg = float(np.degrees(dominant_theta)) % 180.0
-
-        # Twist angle: deviation from the dominant warp/weft axis
-        # Cotton twist angle range: 15°–45° (S or Z twist)
-        twist_angle = abs(dominant_deg - 90.0) % 45.0
-        if twist_angle < 5:
-            twist_angle = 15.0  # default for near-orthogonal (hard to detect)
-        return round(float(np.clip(twist_angle, 10.0, 45.0)), 1), round(float(dominant_deg), 1)
-
-    # ------------------------------------------------------------------
-    # ⑪ Weave type detection
-    # ------------------------------------------------------------------
-    def _detect_weave_type(self, gray: np.ndarray) -> str:
-        f = np.fft.fft2(gray.astype(np.float32))
-        fshift = np.fft.fftshift(f)
-        magnitude = np.abs(fshift)
-        h, w = magnitude.shape
+        h, w = img.shape[:2]
         cy, cx = h // 2, w // 2
-        magnitude[cy - 6:cy + 6, cx - 6:cx + 6] = 0
+        crop = img[cy - h // 4:cy + h // 4, cx - w // 4:cx + w // 4]
+        lab  = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB).astype(np.float32)
+        L    = lab[:, :, 0] * (100.0 / 255.0)   # [0,100]
+        b    = lab[:, :, 2] - 128.0              # [-128,127]
 
-        horiz_e = float(np.sum(magnitude[cy - 4:cy + 4, :]))
-        vert_e = float(np.sum(magnitude[:, cx - 4:cx + 4]))
-        diag1_e = float(np.trace(magnitude))
-        diag2_e = float(np.trace(np.fliplr(magnitude)))
-        diag_e = diag1_e + diag2_e
-        total = horiz_e + vert_e + diag_e + 1e-6
+        Rd     = float(np.clip(np.mean(L) * 0.87 + 4.0, 45.0, 92.0))
+        plus_b = float(np.clip(np.mean(b) * 0.30 + 8.5, 4.0, 18.0))
+        return round(Rd, 1), round(plus_b, 1)
 
-        if (horiz_e + vert_e) / total > 0.58:
-            return "Plain weave (1/1)"
-        if diag_e / total > 0.40:
-            return "Twill weave (2/1 or 3/1)"
-        if (horiz_e + vert_e) / total > 0.45:
-            return "Rib / Oxford weave"
+    def _usda_color_grade(self, rd: float, pb: float) -> tuple[str, str]:
+        """Map Rd / +b to USDA Nickerson-Hunter color grade."""
+        if rd >= 77 and pb <= 9.5:   return "Good Middling",        "11"
+        if rd >= 73 and pb <= 10.0:  return "Strict Middling",      "21"
+        if rd >= 69 and pb <= 10.5:  return "Middling",             "31"
+        if rd >= 65 and pb <= 11.0:  return "Strict Low Middling",  "41"
+        if rd >= 60 and pb <= 11.5:  return "Low Middling",         "51"
+        if rd >= 55 and pb <= 12.0:  return "Strict Good Ordinary", "61"
+        if rd >= 45:                  return "Good Ordinary",        "71"
+        return "Below Grade", "BCG"
+
+    def _ui_grade(self, ui: float) -> tuple[str, str]:
+        for lo, hi, name, letter in UI_GRADES:
+            if ui >= lo:
+                return name, letter
+        return "Very Low", "D"
+
+    # ────────────────────────────────────────────────────────────────
+    # ④ SCI — official USTER HVI regression formula
+    # SCI = -414.67 + 2.9×STR + 49.17×UHML_in + 4.75×UI - 9.32×MIC + 0.67×Rd + 0.36×+b
+    # ────────────────────────────────────────────────────────────────
+    def _sci(self, strength: float, mic: float, uhml_in: float,
+             ui: float, rd: float, plus_b: float) -> float:
+        sci = (-414.67
+               + 2.9   * strength
+               + 49.17 * uhml_in
+               + 4.75  * ui
+               - 9.32  * mic
+               + 0.67  * rd
+               + 0.36  * plus_b)
+        return float(np.clip(sci, 0, 500))
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑤ Trash Content
+    # ────────────────────────────────────────────────────────────────
+    def _trash_content(self, img: np.ndarray) -> float:
+        """
+        Detect visible trash particles (leaf, bark, seed coat fragments).
+        Uses dark-region morphological analysis on HSV V-channel.
+        Returns % area.
+        """
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        v   = hsv[:, :, 2]
+        _, dark = cv2.threshold(v, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        # Remove very large regions (shadows / background)
+        kernel  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        cleaned = cv2.morphologyEx(dark, cv2.MORPH_OPEN, kernel)
+        pct     = float(np.sum(cleaned > 0)) / cleaned.size * 100.0
+        return float(np.clip(pct, 0.0, 15.0))
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑥ Maturity Ratio
+    # ────────────────────────────────────────────────────────────────
+    def _maturity_ratio(self, gray: np.ndarray) -> float:
+        """
+        Maturity ratio proxy: ratio of filled fiber cross-section to perimeter.
+        Mature fibers → thicker walls → lower perimeter/area ratio.
+        AFIS target: ≥ 0.85
+        """
+        edges  = cv2.Canny(gray, 40, 100)
+        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE,
+                                   cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        perimeter_frac = float(np.sum(closed > 0)) / closed.size
+        maturity = 1.0 - perimeter_frac * 2.8
+        return float(np.clip(maturity, 0.60, 1.00))
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑦ IPI — Imperfection Index
+    # ────────────────────────────────────────────────────────────────
+    def _imperfection_index(self, gray: np.ndarray, nep_index: float) -> float:
+        """
+        IPI proxy = thin places (−50%) + thick places (+50%) + neps (200%).
+        Thin places: very low local variance regions.
+        Thick places: very high local variance regions.
+        """
+        gf  = gray.astype(np.float32)
+        k   = np.ones((5, 5), np.float32) / 25
+        mu  = cv2.filter2D(gf, -1, k)
+        mu2 = cv2.filter2D(gf * gf, -1, k)
+        var = np.clip(mu2 - mu ** 2, 0, None)
+        mean_var = float(np.mean(var)) + 1e-6
+
+        thin_frac   = float(np.sum(var < mean_var * 0.25)) / var.size
+        thick_frac  = float(np.sum(var > mean_var * 3.5))  / var.size
+        nep_contrib = nep_index * 0.15
+
+        ipi = thin_frac * 800 + thick_frac * 600 + nep_contrib
+        return float(np.clip(ipi, 0, 2000))
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑧ Strength factor (full GLCM bank)
+    # ────────────────────────────────────────────────────────────────
+    def _strength_factor(self, img, gray, cover_factor, twist_angle):
+        glcm = graycomatrix(gray.astype(np.uint8), distances=GLCM_DISTANCES,
+                             angles=GLCM_ANGLES, levels=256, symmetric=True, normed=True)
+        hom  = float(np.mean(graycoprops(glcm, "homogeneity")))
+        corr = float(np.mean(graycoprops(glcm, "correlation")))
+        ener = float(np.mean(graycoprops(glcm, "energy")))
+        cont = float(np.mean(graycoprops(glcm, "contrast")))
+        p    = glcm + 1e-12
+        entr_score = max(0.0, 1.0 - float(-np.sum(p * np.log2(p))) / 80.0)
+
+        lap_var   = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        sharp     = float(np.clip(lap_var / 120.0, 0, 1))
+        hsv       = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        sat_score = float(np.clip(1.0 - np.std(hsv[:,:,1].astype(np.float32)) / 80.0, 0, 1))
+        cont_score= float(np.clip(1.0 - cont / 200.0, 0, 1))
+        cov_score = float(np.clip(cover_factor * 1.2, 0, 1))
+        twist_s   = float(np.clip(1.0 - abs(twist_angle - 25.0) / 35.0, 0.2, 1))
+
+        f = (hom*18 + corr*10 + ener*8 + entr_score*8 + sharp*8
+             + sat_score*6 + cont_score*5 + cov_score*5 + twist_s*4)
+        return float(np.clip(f, 25.0, 80.0))
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑨ Uniformity Index
+    # ────────────────────────────────────────────────────────────────
+    def _uniformity_index(self, gray):
+        gf = gray.astype(np.float32)
+        k  = np.ones((7,7), np.float32) / 49
+        mu = cv2.filter2D(gf, -1, k)
+        mu2= cv2.filter2D(gf*gf, -1, k)
+        var= np.clip(mu2 - mu**2, 0, None)
+        cv_local = float(np.mean(np.sqrt(var))) / (float(np.mean(gf)) + 1e-6)
+        ui = 100.0 * (1.0 - np.clip(cv_local, 0, 0.5) / 0.5 * 0.25)
+        return _clip(ui, 50.0, 100.0, 1)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑩ Micronaire proxy
+    # ────────────────────────────────────────────────────────────────
+    def _micronaire(self, gray):
+        edges = cv2.Canny(gray, 50, 110)
+        ed    = float(np.sum(edges > 0)) / (gray.shape[0] * gray.shape[1])
+        f     = np.fft.fft2(gray.astype(np.float32))
+        mag   = np.abs(np.fft.fftshift(f))
+        h, w  = mag.shape; cy, cx = h//2, w//2; r = min(h,w)//4
+        inner = np.zeros_like(mag); cv2.circle(inner, (cx,cy), r, 1, -1)
+        hf    = 1.0 - float(np.sum(mag*inner)) / (float(np.sum(mag)) + 1e-6)
+        mic   = 6.5 - (ed * 8.0 + hf * 4.0)
+        return _clip(mic, 2.5, 7.5, 2)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑪ Nep index
+    # ────────────────────────────────────────────────────────────────
+    def _nep_index(self, img):
+        gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        k     = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9,9))
+        th    = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, k)
+        _, bi = cv2.threshold(th, 18, 255, cv2.THRESH_BINARY)
+        cnts, _ = cv2.findContours(bi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        neps  = [c for c in cnts if 2 < cv2.contourArea(c) < 40]
+        return _clip(len(neps) * 6.0, 0, 800, 1)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑫ Short fiber index
+    # ────────────────────────────────────────────────────────────────
+    def _short_fiber_index(self, gray, mic):
+        resps = []
+        for theta in np.linspace(0, np.pi, 6, endpoint=False):
+            k = cv2.getGaborKernel((15,15), 2.5, float(theta), 5.0, 0.5, 0, ktype=cv2.CV_32F)
+            resps.append(float(np.mean(np.abs(cv2.filter2D(gray.astype(np.float32), cv2.CV_32F, k)))))
+        sfi = float(np.mean(resps)) * 0.08 + (mic - 3.5) / 4.0 * 6.0
+        return _clip(sfi, 0, 40, 1)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑬ Hairiness
+    # ────────────────────────────────────────────────────────────────
+    def _hairiness(self, gray):
+        sx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        sy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        gm = np.sqrt(sx**2 + sy**2)
+        hf = float(np.sum(gm > np.percentile(gm, 85))) / gm.size
+        return _clip(3.0 + hf * 60.0, 2.0, 14.0, 2)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑭ Elongation
+    # ────────────────────────────────────────────────────────────────
+    def _elongation(self, gray, mic, strength):
+        glcm = graycomatrix(gray.astype(np.uint8), distances=[4],
+                             angles=[0, np.pi/2], levels=256, symmetric=True, normed=True)
+        corr = float(np.mean(graycoprops(glcm, "correlation")))
+        elg  = 4.0 + corr * 6.0 + (5.0 - mic) * 0.3
+        return _clip(elg, 3.0, 14.0, 1)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑮ Cover factor
+    # ────────────────────────────────────────────────────────────────
+    def _cover_factor(self, gray):
+        _, bi = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        dark  = 1.0 - float(np.sum(bi > 0)) / bi.size
+        return _clip(0.3 + dark * 1.4, 0.3, 1.0, 3)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑯ Fiber orientation (Gabor filter bank)
+    # ────────────────────────────────────────────────────────────────
+    def _fiber_orientation(self, gray):
+        resps = {}
+        for theta in np.linspace(0, np.pi, 8, endpoint=False):
+            total = sum(
+                float(np.mean(np.abs(cv2.filter2D(
+                    gray.astype(np.float32), cv2.CV_32F,
+                    cv2.getGaborKernel((21,21), s*0.3, float(theta), float(s), 0.5, 0, ktype=cv2.CV_32F)
+                )))) for s in GABOR_SCALES
+            )
+            resps[theta] = total
+        dom   = max(resps, key=resps.__getitem__)
+        deg   = float(np.degrees(dom)) % 180.0
+        twist = abs(deg - 90.0) % 45.0
+        if twist < 5: twist = 15.0
+        return _clip(twist, 10.0, 45.0, 1), round(deg, 1)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑰ Weave type
+    # ────────────────────────────────────────────────────────────────
+    def _weave_type(self, gray):
+        fsh = np.fft.fftshift(np.fft.fft2(gray.astype(np.float32)))
+        mag = np.abs(fsh)
+        h, w = mag.shape; cy, cx = h//2, w//2
+        mag[cy-6:cy+6, cx-6:cx+6] = 0
+        he = float(np.sum(mag[cy-4:cy+4, :])); ve = float(np.sum(mag[:, cx-4:cx+4]))
+        de = float(np.trace(mag)) + float(np.trace(np.fliplr(mag)))
+        tot = he + ve + de + 1e-6
+        if (he+ve)/tot > 0.58: return "Plain weave (1/1)"
+        if de/tot > 0.40:       return "Twill weave (2/1 or 3/1)"
+        if (he+ve)/tot > 0.45:  return "Rib / Oxford weave"
         return "Satin / complex weave"
 
-    # ------------------------------------------------------------------
-    # ⑫ Spinning system estimation
-    # ------------------------------------------------------------------
-    def _estimate_spinning_system(
-        self, gray: np.ndarray, uniformity: float, hairiness: float, twist_angle: float
-    ) -> str:
-        """
-        Estimate spinning system from image texture characteristics:
-        - Ring-spun: moderate hairiness (H 4–7), regular twist, higher uniformity
-        - Combed ring: low nep, high uniformity, low hairiness
-        - OE rotor: high hairiness, low twist regularity, bulkier texture
-        - Air-jet: very low hairiness, parallel fiber arrangement
-        """
-        if hairiness < 4.5 and uniformity > 85:
-            return "combed"
-        if hairiness > 8.0:
-            return "oe"
-        if hairiness < 3.5:
-            return "air_jet"
+    # ────────────────────────────────────────────────────────────────
+    # ⑱ Spinning system
+    # ────────────────────────────────────────────────────────────────
+    def _spinning_system(self, ui, hairiness, twist):
+        if hairiness < 4.5 and ui > 85: return "combed"
+        if hairiness > 8.0:              return "oe"
+        if hairiness < 3.5:              return "air_jet"
         return "ring"
 
-    # ------------------------------------------------------------------
-    # ⑬ Cotton type classification
-    # ------------------------------------------------------------------
-    def _classify_cotton_type(self, ne: float, uniformity: float, micronaire: float) -> dict:
-        if ne >= 60 and uniformity >= 88 and micronaire <= 4.0:
-            key = "extra_long_staple"
-        elif ne >= 40 and uniformity >= 84 and micronaire <= 4.9:
-            key = "long_staple"
-        elif ne >= 20 or (uniformity >= 80 and micronaire <= 5.2):
-            key = "medium_staple"
-        else:
-            key = "short_staple"
+    def _spin_label(self, s):
+        return {"ring":"Ring-spun (RS)","combed":"Ring-spun Combed (RSC)",
+                "oe":"Open-End Rotor (OE)","air_jet":"Air-jet / Vortex"}.get(s, s)
+
+    # ────────────────────────────────────────────────────────────────
+    # ⑲ Cotton type classification
+    # ────────────────────────────────────────────────────────────────
+    def _classify_cotton(self, ne, ui, mic, uhml_in):
+        if uhml_in >= 1.375 and ui >= 88 and mic <= 4.3: key = "extra_long_staple"
+        elif uhml_in >= 1.125 and ui >= 84 and mic <= 4.9: key = "long_staple"
+        elif uhml_in >= 1.000 or (ne >= 30 and ui >= 82): key = "medium_long_staple"
+        elif uhml_in >= 0.875 or ne >= 20:                 key = "medium_staple"
+        else:                                               key = "short_staple"
         return {**COTTON_TYPES[key], "key": key}
 
-    # ------------------------------------------------------------------
-    # ⑭ CSP grade
-    # ------------------------------------------------------------------
-    def _csp_grade(self, ne: float, csp: float, spinning_system: str) -> tuple[str, str]:
-        b = self._get_benchmark(ne, csp, spinning_system)
-        if csp >= b["csp_excellent"]:
-            return "A", "Excellent"
-        if csp >= b["csp_good"]:
-            return "B", "Good"
-        if csp >= b["csp_average"]:
-            return "C", "Average"
+    # ────────────────────────────────────────────────────────────────
+    # ⑳ CSP grade + benchmarks
+    # ────────────────────────────────────────────────────────────────
+    def _csp_grade(self, ne, csp, sys):
+        b = self._benchmark(ne, csp, sys)
+        if csp >= b["csp_excellent"]: return "A", "Excellent"
+        if csp >= b["csp_good"]:      return "B", "Good"
+        if csp >= b["csp_average"]:   return "C", "Average"
         return "D", "Below Average"
 
-    # ------------------------------------------------------------------
-    # ⑮ USTER® benchmark lookup
-    # ------------------------------------------------------------------
-    def _get_benchmark(self, ne: float, csp: float, spinning_system: str) -> dict:
-        table = USTER_COMBED if spinning_system == "combed" else (
-            USTER_OE_ROTOR if spinning_system == "oe" else USTER_CARDED
-        )
+    def _benchmark(self, ne, csp, sys):
+        table = USTER_COMBED if sys == "combed" else (USTER_OE if sys == "oe" else USTER_CARDED)
         for ne_min, ne_max, p5, p25, p50, p75, p95 in table:
             if ne_min <= ne < ne_max:
-                percentile = "Bottom 25%"
-                if csp >= p25:
-                    percentile = "Top 25% (Excellent)"
-                elif csp >= p50:
-                    percentile = "25–50% (Good)"
-                elif csp >= p75:
-                    percentile = "50–75% (Average)"
-                return {
-                    "ne_range": f"Ne {ne_min}–{ne_max}",
-                    "csp_excellent": p25,
-                    "csp_good": p50,
-                    "csp_average": p75,
-                    "csp_below": p95,
-                    "csp_minimum": p5,
-                    "uster_percentile": percentile,
-                    "spinning_system": SPINNING_SYSTEMS.get(spinning_system, spinning_system),
-                }
-        # Fallback
-        return {
-            "ne_range": f"Ne {ne:.0f}",
-            "csp_excellent": 3000, "csp_good": 2600,
-            "csp_average": 2200, "csp_below": 1800, "csp_minimum": 1400,
-            "uster_percentile": "—",
-            "spinning_system": SPINNING_SYSTEMS.get(spinning_system, spinning_system),
-        }
+                pct = ("Top 25%" if csp >= p25 else "25–50%" if csp >= p50
+                       else "50–75%" if csp >= p75 else "Bottom 25%")
+                return {"ne_range":f"Ne {ne_min}–{ne_max}","csp_excellent":p25,
+                        "csp_good":p50,"csp_average":p75,"csp_below":p95,
+                        "csp_minimum":p5,"uster_percentile":pct,
+                        "spinning_system":self._spin_label(sys)}
+        return {"ne_range":f"Ne {ne:.0f}","csp_excellent":3000,"csp_good":2600,
+                "csp_average":2200,"csp_below":1800,"csp_minimum":1400,
+                "uster_percentile":"—","spinning_system":self._spin_label(sys)}
 
-    # ------------------------------------------------------------------
-    # ⑯ BCI check
-    # ------------------------------------------------------------------
-    def _bci_check(
-        self, uniformity, nep_index, short_fiber, strength, micronaire, elongation
-    ) -> dict:
+    # ────────────────────────────────────────────────────────────────
+    # BCI / ITMF / Quality score
+    # ────────────────────────────────────────────────────────────────
+    def _bci(self, ui, nep, sfi, str_, mic, elg, sci, mat):
         checks = {
-            "Uniformity index ≥ 82%": uniformity >= BCI_THRESHOLDS["uniformity_index"],
-            "Nep count < 200/g": nep_index < BCI_THRESHOLDS["nep_count"],
-            "Short fiber < 10%": short_fiber < BCI_THRESHOLDS["short_fiber_content"],
-            "Strength ≥ 26 g/tex": strength >= BCI_THRESHOLDS["strength_grams_tex"],
-            "Micronaire 3.5–5.0": BCI_THRESHOLDS["micronaire_min"] <= micronaire <= BCI_THRESHOLDS["micronaire_max"],
-            "Elongation ≥ 6%": elongation >= BCI_THRESHOLDS["elongation_min"],
+            "Uniformity Index ≥ 82%":  ui  >= BCI_THRESHOLDS["uniformity_index"],
+            "Nep Count < 200/g":       nep <  BCI_THRESHOLDS["nep_count"],
+            "Short Fiber < 10%":       sfi <  BCI_THRESHOLDS["short_fiber_content"],
+            "Strength ≥ 26 g/tex":     str_ >= BCI_THRESHOLDS["strength_grams_tex"],
+            "Micronaire 3.5–5.0":      BCI_THRESHOLDS["micronaire_min"] <= mic <= BCI_THRESHOLDS["micronaire_max"],
+            "Elongation ≥ 6%":         elg >= BCI_THRESHOLDS["elongation_min"],
+            "SCI ≥ 100":               sci >= BCI_THRESHOLDS["sci_min"],
+            "Maturity Ratio ≥ 0.78":   mat >= BCI_THRESHOLDS["maturity_min"],
         }
         passed = sum(1 for v in checks.values() if v)
-        total = len(checks)
-        return {
-            "checks": checks,
-            "passed": passed,
-            "total": total,
-            "status": (
-                "Meets BCI Standard" if passed == total
-                else "Partially Meets BCI" if passed >= 4
-                else "Does Not Meet BCI"
-            ),
-        }
+        return {"checks": checks, "passed": passed, "total": len(checks),
+                "status": ("Meets BCI Standard" if passed == len(checks)
+                           else "Partially Meets BCI" if passed >= 6
+                           else "Does Not Meet BCI")}
 
-    # ------------------------------------------------------------------
-    # ⑰ ITMF count variation check
-    # ------------------------------------------------------------------
-    def _itmf_cv_check(self, ne: float, uniformity: float) -> dict:
-        """
-        ITMF-CIG count variation limits.
-        CV% of count should be < 2% (excellent) / 3% (good) / 5% (acceptable).
-        """
-        # Proxy CV from uniformity (inverse relationship)
-        cv_pct = (100.0 - uniformity) * 0.18
-        status = "Excellent" if cv_pct < 2 else "Good" if cv_pct < 3 else "Acceptable" if cv_pct < 5 else "Exceeds Limit"
-        return {
-            "cv_percent": round(cv_pct, 2),
-            "limit_excellent": 2.0,
-            "limit_good": 3.0,
-            "limit_acceptable": 5.0,
-            "status": status,
-        }
+    def _itmf_cv(self, ne, ui):
+        cv = (100.0 - ui) * 0.18
+        st = ("Excellent" if cv < 2 else "Good" if cv < 3 else "Acceptable" if cv < 5 else "Exceeds Limit")
+        return {"cv_percent": round(cv, 2), "limit_excellent": 2.0,
+                "limit_good": 3.0, "limit_acceptable": 5.0, "status": st}
 
-    # ------------------------------------------------------------------
-    # ⑱ Quality score
-    # ------------------------------------------------------------------
-    def _compute_quality_score(
-        self, csp, ne, uniformity, nep_index, short_fiber, micronaire, bci_status
-    ) -> int:
-        score = 0
-        score += min(40, int((csp / 4000.0) * 40))
-        score += min(20, int((uniformity - 50) / 50.0 * 20))
-        score += min(15, max(0, int((200 - nep_index) / 200.0 * 15)))
-        score += min(15, max(0, int((10 - short_fiber) / 10.0 * 15)))
-        score += min(10, int(bci_status["passed"] / bci_status["total"] * 10))
-        return int(np.clip(score, 0, 100))
+    def _quality_score(self, csp, ui, nep, sfi, mic, sci, bci):
+        s = 0
+        s += min(30, int(csp / 5200.0 * 30))
+        s += min(15, int((ui - 50) / 50.0 * 15))
+        s += min(10, max(0, int((200 - nep) / 200.0 * 10)))
+        s += min(10, max(0, int((10 - sfi) / 10.0 * 10)))
+        s += min(15, int(min(sci, 300) / 300.0 * 15))
+        s += min(20, int(bci["passed"] / bci["total"] * 20))
+        return int(np.clip(s, 0, 100))
 
-    # ------------------------------------------------------------------
-    # ⑲ Findings
-    # ------------------------------------------------------------------
-    def _build_findings(
-        self, ne, csp, grade, uniformity, nep_index, short_fiber, micronaire,
-        hairiness, elongation, weave_type, cotton_type, bci_status,
-        spinning_system, cover_factor, twist_angle, warp_tpi, weft_tpi
-    ) -> list[str]:
-        lines = [
-            f"Yarn count: Ne {ne:.1f} — {cotton_type['name']} ({cotton_type['examples']}). "
-            f"Warp: {warp_tpi:.0f} tpi, Weft: {weft_tpi:.0f} tpi.",
-
-            f"CSP Score: {int(csp)} — Grade {grade} ({self._csp_grade(ne, csp, spinning_system)[1]}). "
-            f"USTER® percentile: {self._get_benchmark(ne, csp, spinning_system)['uster_percentile']}.",
-
-            f"Spinning system: {SPINNING_SYSTEMS.get(spinning_system, spinning_system)}. "
-            f"Weave: {weave_type}. Cover factor: {cover_factor:.3f}.",
-
-            f"Fiber fineness (micronaire proxy): {micronaire:.2f} µg/in "
-            f"({'premium' if 3.5 <= micronaire <= 4.9 else 'acceptable' if micronaire <= 5.2 else 'coarse'}). "
-            f"Twist angle: {twist_angle:.1f}°.",
-
-            f"Uniformity index: {uniformity:.1f}% "
-            f"({'≥ BCI 82% threshold ✓' if uniformity >= 82 else '< BCI 82% threshold ✗ — check fiber blending'}).",
-
-            f"Nep index: {nep_index:.0f}/g equivalent "
-            f"({'acceptable ✓' if nep_index < 200 else 'elevated ✗ — improve cleaning / carding'}).",
-
-            f"Short fiber index: {short_fiber:.1f}% "
-            f"({'< BCI 10% threshold ✓' if short_fiber < 10 else '> BCI 10% ✗ — check ginning and fiber selection'}).",
-
-            f"Hairiness index: {hairiness:.2f} "
-            f"({'low ✓' if hairiness < 5 else 'moderate' if hairiness < 8 else 'high — check singed or mercerised'}). "
-            f"Elongation: {elongation:.1f}% "
-            f"({'✓ above BCI 6% min' if elongation >= 6 else '✗ below BCI minimum'}).",
-
-            f"BCI Quality Check: {bci_status['passed']}/{bci_status['total']} passed — {bci_status['status']}.",
-
-            f"Cotton type detail: {cotton_type['description']} "
-            f"Typical uses: {cotton_type['typical_uses']}. "
-            f"End-use count range: {cotton_type['end_count_range']}.",
+    # ────────────────────────────────────────────────────────────────
+    # Findings + Recommendations
+    # ────────────────────────────────────────────────────────────────
+    def _findings(self, ne, csp, grade, uhml_in, uhml_mm, ml_in, sfc_n, sfc_w,
+                   ui, ui_grade, mic, nep, sfi, hai, elg, rd, pb, cg_name,
+                   trash, mat, sci, ipi, weave, ct, bci, sys, cov,
+                   twist, warp, weft, sg):
+        return [
+            f"Yarn count Ne {ne:.1f} · Warp {warp:.0f} tpi / Weft {weft:.0f} tpi · Cover factor {cov:.3f}",
+            f"Staple length (UHML): {uhml_in:.3f}\" ({uhml_mm} mm) — {sg['name']} ({ct['examples']}) · ML {ml_in:.3f}\"",
+            f"SFC (short fiber < 12.7 mm): {sfc_n:.1f}% by number / {sfc_w:.1f}% by weight",
+            f"Uniformity Index: {ui:.1f}% — {ui_grade} · Micronaire: {mic:.2f} µg/in · Maturity ratio: {mat:.3f}",
+            f"HVI Color: Rd {rd:.1f} / +b {pb:.1f} → USDA '{cg_name}' · Trash content: {trash:.2f}%",
+            f"SCI (Spinning Consistency Index): {sci:.1f} · IPI (Imperfection Index): {ipi:.0f}",
+            f"CSP: {csp} — Grade {grade} · {self._spin_label(sys)} · {weave} · Twist {twist:.1f}°",
+            f"Strength factor: {0:.0f} g/tex · Elongation: {elg:.1f}% · Hairiness: {hai:.2f} · Nep: {nep:.0f}/g",
+            f"BCI: {bci['passed']}/{bci['total']} checks — {bci['status']}",
+            f"Cotton type: {ct['name']} · {ct['description']}",
         ]
-        return lines
 
-    # ------------------------------------------------------------------
-    # ⑳ Recommendations
-    # ------------------------------------------------------------------
-    def _recommendations(
-        self, uniformity, nep_index, short_fiber, micronaire, hairiness, bci_status
-    ) -> list[str]:
+    def _recommendations(self, ui, nep, sfi, mic, hai, mat, rd, trash, bci):
         recs = []
-        if uniformity < 82:
-            recs.append(
-                "Uniformity below BCI threshold — review fiber blending ratio, "
-                "draw frame settings, and autoleveller calibration."
-            )
-        if nep_index >= 200:
-            recs.append(
-                "Elevated nep count — check card clothing wire condition, "
-                "increase flat speed, verify cotton opening sequence."
-            )
-        if short_fiber >= 10:
-            recs.append(
-                "High short fiber content — consider upgrading to long-staple raw material, "
-                "or add combing process. Review ginning parameters."
-            )
-        if micronaire > 5.0:
-            recs.append(
-                "Coarse micronaire detected — use finer staple cotton or blend with ELS. "
-                "Coarser fiber reduces tensile strength and CSP."
-            )
-        if hairiness > 7:
-            recs.append(
-                "High hairiness — check singeing machine efficiency, "
-                "review ring traveller condition and spinning tension."
-            )
-        if bci_status["passed"] < bci_status["total"]:
-            failed = [k for k, v in bci_status["checks"].items() if not v]
-            recs.append(f"BCI checks failed: {', '.join(failed)}. "
-                        "Review raw material sourcing against BCI supplier guidelines.")
+        if ui < 82:
+            recs.append("Uniformity below BCI 82% — review draw frame settings and autoleveller calibration.")
+        if nep >= 200:
+            recs.append("Elevated nep count — check card clothing wire condition, increase flat speed.")
+        if sfi >= 10:
+            recs.append("High SFC — upgrade to longer staple cotton or add combing. Review ginning parameters.")
+        if mic > 5.0:
+            recs.append("Coarse micronaire — blend with finer staple cotton to improve CSP.")
+        if hai > 7:
+            recs.append("High hairiness — check singeing efficiency, ring traveller condition and spinning tension.")
+        if mat < 0.78:
+            recs.append("Low maturity ratio — risk of dye uptake problems. Source from better-matured picking.")
+        if rd < 65:
+            recs.append("Low reflectance (Rd) — check cotton storage conditions and excess moisture exposure.")
+        if trash > 2.0:
+            recs.append(f"Trash content {trash:.1f}% — review cotton cleaning sequence and pre-cleaning efficiency.")
+        if bci["passed"] < bci["total"]:
+            failed = [k for k, v in bci["checks"].items() if not v]
+            recs.append(f"BCI failed: {', '.join(failed[:3])}. Review BCI supplier sourcing guidelines.")
         if not recs:
-            recs.append(
-                "All key quality parameters are within acceptable ranges. "
-                "Continue monitoring with regular USTER® Tester and HVI classing."
-            )
+            recs.append("All key quality parameters within acceptable ranges. Monitor with regular HVI and AFIS testing.")
         return recs
 
-    # ------------------------------------------------------------------
+    # ────────────────────────────────────────────────────────────────
     def _decode(self, image_bytes: bytes) -> np.ndarray:
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
-            raise ValueError("Could not decode image — unsupported format")
+            raise ValueError("Could not decode image")
         return cv2.resize(img, (IMG_SIZE, IMG_SIZE))

@@ -31,13 +31,29 @@ interface ItmfCv {
   cv_percent: number; limit_excellent: number; limit_good: number;
   limit_acceptable: number; status: string;
 }
+interface StapleGrade {
+  name: string; examples: string;
+  uhml_min: number; uhml_max: number; uhml_inches: number;
+}
 interface CspResult {
   analysis_id: string; timestamp: string;
   csp: number; estimated_ne: number; strength_factor: number;
   grade: string; grade_label: string; quality_score: number;
-  uniformity_index: number; micronaire: number; fiber_fineness_index: number;
+  uniformity_index: number; ui_grade: string; ui_grade_letter: string;
+  micronaire: number; fiber_fineness_index: number;
   nep_index: number; short_fiber_index: number;
   hairiness_index: number; elongation_index: number;
+  /* HVI Staple Length */
+  uhml_inches: number; uhml_mm: number;
+  mean_length_inches: number; mean_length_mm: number;
+  sfc_n: number; sfc_w: number;
+  staple_grade: StapleGrade;
+  /* HVI Color */
+  rd: number; plus_b: number; color_grade: string; color_grade_code: string;
+  trash_percent: number;
+  /* HVI Spinnability */
+  sci: number; ipi: number; maturity_ratio: number;
+  /* Fabric */
   warp_tpi: number; weft_tpi: number; cover_factor: number;
   twist_angle: number; fiber_orientation_deg: number;
   weave_type: string; spinning_system: string;
@@ -367,6 +383,142 @@ export default function CspPage() {
               {dlErr && <p className="mt-2 text-sm text-destructive">{dlErr}</p>}
             </CardContent>
           </Card>
+
+          {/* ══ HVI Staple Length ══════════════════════════════════ */}
+          <div className="grid md:grid-cols-3 gap-5">
+            <Card className="md:col-span-2">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-amber-500" />
+                  HVI Staple Length (Cotton Fibre Length)
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">ASTM D5867 · Lord's formula</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
+                  {[
+                    { label: "UHML (inches)", value: result.uhml_inches?.toFixed(3) ?? "—", note: "Upper Half Mean Length", highlight: true },
+                    { label: "UHML (mm)",     value: `${result.uhml_mm ?? "—"} mm`,          note: "Staple length in mm" },
+                    { label: "Mean Length",   value: `${result.mean_length_inches?.toFixed(3) ?? "—"}″`, note: "ML (7.8% fibrogram point)" },
+                    { label: "SFC_n (%)",     value: `${result.sfc_n?.toFixed(1) ?? "—"}%`,  note: "Short fibre by number (<12.7 mm)" },
+                    { label: "SFC_w (%)",     value: `${result.sfc_w?.toFixed(1) ?? "—"}%`,  note: "Short fibre by weight" },
+                    { label: "UI (%)",        value: `${result.uniformity_index?.toFixed(1) ?? "—"}%`,  note: `${result.ui_grade} (${result.ui_grade_letter})` },
+                  ].map(row => (
+                    <div key={row.label} className={`rounded-lg p-2.5 border ${row.highlight ? "bg-amber-500/10 border-amber-500/30" : "bg-secondary/40 border-secondary"}`}>
+                      <div className="text-xs text-muted-foreground">{row.label}</div>
+                      <div className={`text-xl font-black font-mono mt-0.5 ${row.highlight ? "text-amber-600 dark:text-amber-400" : ""}`}>{row.value}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{row.note}</div>
+                    </div>
+                  ))}
+                </div>
+                <MetricBar label="UHML — Upper Half Mean Length (in)" value={result.uhml_inches} unit="″"
+                  min={0.6} max={1.7} good_lo={1.0} good_hi={1.7} />
+                <div className="mt-3">
+                  <MetricBar label="SFC by number (< 12.7 mm)" value={result.sfc_n} unit="%"
+                    min={0} max={40} good_lo={0} good_hi={9.9} invert />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-purple-500" />
+                  Staple Classification
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="rounded-xl border bg-amber-500/5 border-amber-500/20 px-4 py-3 text-center">
+                  <div className="text-xs text-muted-foreground">Staple Grade</div>
+                  <div className="font-bold text-base mt-0.5">{result.staple_grade?.name ?? "—"}</div>
+                  <div className="text-xs text-amber-600 mt-1">{result.uhml_inches?.toFixed(3)}″ ({result.uhml_mm} mm)</div>
+                </div>
+                <div className="text-xs text-muted-foreground">Examples: {result.staple_grade?.examples ?? "—"}</div>
+                <div className="space-y-1.5 pt-1 border-t text-xs">
+                  {[
+                    ["ELS > 1.375\"",    "bg-green-500"],
+                    ["Long 1.125–1.375\"","bg-blue-500"],
+                    ["Med-Long 1.0–1.125\"","bg-sky-400"],
+                    ["Medium 0.875–1.0\"","bg-amber-500"],
+                    ["Short < 0.875\"",  "bg-red-400"],
+                  ].map(([label, color]) => (
+                    <div key={label} className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full shrink-0 ${color}`} />
+                      <span className="text-muted-foreground">{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ══ HVI Color Grade + Spinnability ═══════════════════════ */}
+          <div className="grid md:grid-cols-2 gap-5">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-yellow-500" />
+                  HVI Colour Grade (USDA Nickerson-Hunter)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-lg border bg-secondary/40 px-3 py-2.5 text-center">
+                    <div className="text-xs text-muted-foreground">Rd — Reflectance</div>
+                    <div className="text-2xl font-black font-mono mt-0.5">{result.rd?.toFixed(1) ?? "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">whiteness proxy</div>
+                  </div>
+                  <div className="rounded-lg border bg-secondary/40 px-3 py-2.5 text-center">
+                    <div className="text-xs text-muted-foreground">+b — Yellowness</div>
+                    <div className="text-2xl font-black font-mono mt-0.5">{result.plus_b?.toFixed(1) ?? "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">lower = better</div>
+                  </div>
+                  <div className="rounded-lg border bg-amber-500/10 border-amber-500/30 px-3 py-2.5 text-center">
+                    <div className="text-xs text-muted-foreground">USDA Grade</div>
+                    <div className="text-xl font-black text-amber-600 mt-0.5">{result.color_grade_code ?? "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">{result.color_grade ?? "—"}</div>
+                  </div>
+                </div>
+                <MetricBar label="Rd — Reflectance (whiteness)" value={result.rd} unit="" min={45} max={92} good_lo={69} good_hi={92} />
+                <MetricBar label="+b — Yellowness (lower = better)" value={result.plus_b} unit="" min={4} max={18} good_lo={4} good_hi={10.5} invert />
+                <div className="flex justify-between text-sm border-t pt-3">
+                  <span className="text-muted-foreground">Trash content</span>
+                  <span className={`font-mono font-semibold ${result.trash_percent > 2 ? "text-red-500" : result.trash_percent > 1 ? "text-amber-500" : "text-green-600"}`}>
+                    {result.trash_percent?.toFixed(2) ?? "—"}%
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Target className="h-4 w-4 text-blue-500" />
+                  Spinnability Indices
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">USTER® HVI formula</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border bg-blue-500/10 border-blue-500/20 px-3 py-2.5 text-center">
+                    <div className="text-xs text-muted-foreground">SCI</div>
+                    <div className="text-3xl font-black font-mono text-blue-600 dark:text-blue-400">{result.sci?.toFixed(0) ?? "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">Spinning Consistency Index</div>
+                  </div>
+                  <div className="rounded-lg border bg-secondary/40 px-3 py-2.5 text-center">
+                    <div className="text-xs text-muted-foreground">IPI</div>
+                    <div className="text-3xl font-black font-mono">{result.ipi?.toFixed(0) ?? "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">Imperfection Index</div>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground bg-secondary/40 rounded-lg px-3 py-2">
+                  SCI = −414.67 + 2.9×STR + 49.17×UHML + 4.75×UI − 9.32×MIC + 0.67×Rd + 0.36×(+b)
+                </div>
+                <MetricBar label="Maturity Ratio (AFIS proxy)" value={result.maturity_ratio} unit="" min={0.6} max={1.0} good_lo={0.85} good_hi={1.0} />
+                <MetricBar label="SCI (Spinning Consistency Index)" value={result.sci} unit="" min={0} max={400} good_lo={100} good_hi={400} />
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Two-column metrics */}
           <div className="grid md:grid-cols-2 gap-5">

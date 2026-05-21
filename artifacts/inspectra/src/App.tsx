@@ -6,6 +6,7 @@ import HomePage from "@/pages/HomePage";
 import AnalyzePage from "@/pages/AnalyzePage";
 import ComparePage from "@/pages/ComparePage";
 import CspPage from "@/pages/CspPage";
+import CspComparePage from "@/pages/CspComparePage";
 import DashboardPage from "@/pages/DashboardPage";
 import ResultPage from "@/pages/ResultPage";
 import LoginPage from "@/pages/LoginPage";
@@ -22,6 +23,7 @@ function Router() {
           <Route path="/analyze" component={AnalyzePage} />
           <Route path="/compare" component={ComparePage} />
           <Route path="/csp" component={CspPage} />
+          <Route path="/csp-compare" component={CspComparePage} />
           <Route path="/dashboard" component={DashboardPage} />
           <Route path="/results/:id" component={ResultPage} />
           <Route path="/login" component={LoginPage} />

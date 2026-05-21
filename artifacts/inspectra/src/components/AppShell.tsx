@@ -10,6 +10,7 @@ import {
   Menu,
   X,
   Wheat,
+  FlaskConical,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/analyze", label: "Analyze", icon: Upload },
   { href: "/compare", label: "Compare", icon: GitCompare },
   { href: "/csp", label: "CSP Report", icon: Wheat },
+  { href: "/csp-compare", label: "CSP Compare", icon: FlaskConical },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ] as const;
 
