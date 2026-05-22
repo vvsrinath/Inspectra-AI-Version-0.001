@@ -16,11 +16,16 @@ interface BciStatus {
   checks: Record<string, boolean>;
   passed: number; total: number; status: string;
 }
+interface CountryOrigin {
+  country: string; region: string; varieties: string;
+}
 interface CottonType {
-  key: string; name: string; examples: string;
-  staple_length: string; micronaire: string;
+  key: string; name: string; examples: string; varieties?: string;
+  staple_length: string; uhml_range?: string; micronaire: string;
   strength_gptex: string; typical_uses: string;
   end_count_range: string; description: string;
+  price_premium?: string; market_share?: string;
+  countries_of_origin?: CountryOrigin[];
 }
 interface Benchmark {
   ne_range: string; csp_excellent: number; csp_good: number;
@@ -611,7 +616,7 @@ export default function CspPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Target className="h-4 w-4 text-green-500" />
-                  ITMF Count Variation · Cotton Type
+                  ITMF Count Variation
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
@@ -630,21 +635,95 @@ export default function CspPage() {
                     ITMF-CIG 2021: {result.itmf_cv.status} (limits: &lt;2% excellent, &lt;3% good, &lt;5% acceptable)
                   </p>
                 </div>
-
-                <div className="border-t pt-3 space-y-2">
-                  <p className="font-semibold">{result.cotton_type.name}</p>
-                  <p className="text-muted-foreground text-xs">{result.cotton_type.examples}</p>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div><span className="text-muted-foreground">Staple:</span> {result.cotton_type.staple_length}</div>
-                    <div><span className="text-muted-foreground">Micronaire:</span> {result.cotton_type.micronaire}</div>
-                    <div><span className="text-muted-foreground">Strength:</span> {result.cotton_type.strength_gptex}</div>
-                    <div><span className="text-muted-foreground">End count:</span> {result.cotton_type.end_count_range}</div>
-                  </div>
-                  <p className="text-muted-foreground text-xs italic">{result.cotton_type.typical_uses}</p>
+                <div className="grid grid-cols-2 gap-2 text-xs border-t pt-3">
+                  <div><span className="text-muted-foreground">End count range:</span><br /><span className="font-semibold">{result.cotton_type.end_count_range}</span></div>
+                  <div><span className="text-muted-foreground">Market share:</span><br /><span className="font-semibold">{result.cotton_type.market_share ?? "—"}</span></div>
+                  <div className="col-span-2"><span className="text-muted-foreground">Price premium:</span> <span className="font-semibold">{result.cotton_type.price_premium ?? "—"}</span></div>
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {/* ══ Cotton Type + Country of Origin ═════════════════════ */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wheat className="h-4 w-4 text-amber-600" />
+                Cotton Type Classification &amp; Country of Origin
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Type hero */}
+              <div className="rounded-xl border bg-amber-500/5 border-amber-500/20 p-4 flex flex-col md:flex-row gap-4">
+                <div className="flex-1 space-y-1">
+                  <div className="text-xs text-muted-foreground">Classified as</div>
+                  <div className="text-2xl font-black">{result.cotton_type.name}</div>
+                  <div className="text-sm text-muted-foreground">{result.cotton_type.description}</div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                  {[
+                    { label: "Staple length", val: result.cotton_type.staple_length },
+                    { label: "UHML range",    val: result.cotton_type.uhml_range ?? result.cotton_type.staple_length },
+                    { label: "Micronaire",    val: result.cotton_type.micronaire },
+                    { label: "Strength",      val: result.cotton_type.strength_gptex },
+                    { label: "End count",     val: result.cotton_type.end_count_range },
+                    { label: "Market share",  val: result.cotton_type.market_share ?? "—" },
+                  ].map(row => (
+                    <div key={row.label} className="rounded-lg border bg-background px-3 py-2">
+                      <div className="text-muted-foreground">{row.label}</div>
+                      <div className="font-semibold mt-0.5">{row.val}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Varieties */}
+              <div>
+                <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">Known Varieties</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(result.cotton_type.varieties ?? result.cotton_type.examples)
+                    .split(",").map((v: string) => v.trim()).filter(Boolean).map((v: string) => (
+                    <span key={v} className="text-xs bg-secondary border border-secondary px-2 py-0.5 rounded-full">{v}</span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Typical uses */}
+              <div className="text-sm border-l-2 border-amber-400 pl-3 py-1">
+                <span className="text-muted-foreground text-xs">Typical applications: </span>
+                {result.cotton_type.typical_uses}
+              </div>
+
+              {/* Countries of origin */}
+              {result.cotton_type.countries_of_origin && result.cotton_type.countries_of_origin.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
+                    Countries of Origin — {result.cotton_type.countries_of_origin.length} major producers
+                  </div>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {result.cotton_type.countries_of_origin.map((c, i) => (
+                      <div key={i} className="rounded-lg border bg-secondary/30 px-3 py-2.5 space-y-0.5">
+                        <div className="font-semibold text-sm">{c.country}</div>
+                        <div className="text-xs text-muted-foreground">{c.region}</div>
+                        <div className="text-xs text-amber-600 dark:text-amber-400">{c.varieties}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Price premium */}
+              {result.cotton_type.price_premium && (
+                <div className="flex items-center gap-3 rounded-lg bg-green-500/5 border border-green-500/20 px-4 py-2.5 text-sm">
+                  <TrendingUp className="h-4 w-4 text-green-500 shrink-0" />
+                  <div>
+                    <span className="text-muted-foreground">Market price premium: </span>
+                    <span className="font-semibold text-green-700 dark:text-green-400">{result.cotton_type.price_premium}</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* BCI checks */}
           <Card>
